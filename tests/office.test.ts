@@ -38,6 +38,7 @@ import {
 } from '../hooks/core'
 import { alertText, crossedAlerts, percentList } from '../hooks/core'
 import { namesFor } from '../hooks/office-core'
+import { lastDays, recordTurn, staleKeys, totalOf, usageReport } from '../hooks/usage-core'
 import type { Check } from '../types'
 
 // ---------------------------------------------------------------- pure behaviour
@@ -584,4 +585,38 @@ test('crossing the budget toasts once and logs it', { options: { costBudgetUsd: 
   const ui = await $.ui.mount({ ...pane(80), surface: 'terminal' })
   expect(await ui.find({ text: /80% of the \$2\.00 budget/ })).toBeDefined()
   await ui.unmount()
+})
+
+// ---------------------------------------------------------------- usage log
+
+test('a session is filed under the day it started; the report totals it', () => {
+  let log = recordTurn({}, 's1', { cwd: '/u/me/agent-office', model: 'claude-opus-5-5', costUsd: 0.4, agents: 2, at: 1000 })
+  log = recordTurn(log, 's1', { cwd: '/u/me/agent-office', model: '', costUsd: 0.9, agents: 1, at: 2000 })
+  log = recordTurn(log, 's2', { cwd: '/u/me/daily-dose', model: 'claude-sonnet-5-5', costUsd: null, agents: 0, at: 3000 })
+  expect(log.s1).toEqual({ cwd: '/u/me/agent-office', model: 'claude-opus-5-5', costUsd: 0.9, turns: 2, agents: 3, firstAt: 1000, lastAt: 2000 })
+  expect(totalOf('d', log)).toEqual({ day: 'd', sessions: 2, turns: 3, agents: 3, costUsd: 0.9 })
+  const today = usageReport('today', [{ day: '2026-10-15', log }])
+  expect(today).toContain('| agent-office | Opus 5.5 | 2 | 3 | $0.90 |')
+  expect(today).toContain('| daily-dose | Sonnet 5.5 | 1 | 0 | — |')
+  expect(usageReport('week', [{ day: '2026-10-14', log: {} }, { day: '2026-10-15', log }])).toContain('| **Total** | 2 | 3 | 3 | **$0.90** |')
+  expect(usageReport('today', [{ day: '2026-10-15', log: {} }])).toBe('No sessions logged today yet.')
+  expect(staleKeys(['usage:2020-01-01', 'usage:2999-01-01', 'other'], Date.parse('2026-10-15T12:00:00'))).toEqual(['usage:2020-01-01'])
+  expect(lastDays(Date.parse('2026-10-15T12:00:00'), 3)).toEqual(['2026-10-13', '2026-10-14', '2026-10-15'])
+})
+
+test('each finished turn is logged, and /office usage reads it back', async ($, on) => {
+  const clock = engine(on)
+  mock.store(on)
+  mock.env(on, { HOME: '/nowhere' })
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('session.cwd', () => ({ value: '/u/me/agent-office' }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  await clock.set(Date.parse('2026-10-15T09:00:00'))
+  await $.session.measure({ context: { window: 200_000, percent: 5 }, cost: { usd: 0.25 } as never, rateLimits: [], changed: ['cost'] })
+  for (const id of ['U1', 'U2']) {
+    await $.turn.start({ text: 'go', turnId: id })
+    await $.turn.complete({ answer: '', durationMs: 10, isAborted: false, turnId: id, reason: 'answer' } as never)
+  }
+  const out = await $.command.run({ command: 'office', args: 'usage', origin: { kind: 'user' } } as never)
+  expect(JSON.stringify(out)).toContain('| agent-office | — | 2 | 0 | $0.25 |')
 })

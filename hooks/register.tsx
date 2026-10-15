@@ -62,6 +62,7 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { STORE_PREFIX, dayOf, lastDays, normalizeDay, recordTurn, staleKeys, usageReport } from './usage-core'
 import { ROOMS, finishErrand, normalizeErrands, officeLine, officeRows, officeScene, roomLabel, startErrand } from './office-core'
 
 const PANE = 'agent-office'
@@ -85,6 +86,7 @@ const view = atom({ plugin: 'agent-office', key: 'view' } as const, DEFAULT_VIEW
 const roster = atom({ plugin: 'agent-office', key: 'roster' } as const, DEFAULT_ROSTER)
 const errands = atom({ plugin: 'agent-office', key: 'errands' } as const, {})
 const alerts = atom({ plugin: 'agent-office', key: 'alerts' } as const, { fired: [] })
+const sessionDay = atom({ plugin: 'agent-office', key: 'sessionDay' } as const, { day: '' })
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -206,6 +208,7 @@ async function resetAll($: EngineInterface) {
   await update($, view, () => DEFAULT_VIEW)
   await update($, errands, () => ({}))
   await update($, alerts, () => ({ fired: [] }))
+  await update($, sessionDay, () => ({ day: '' }))
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null }))
 }
@@ -220,6 +223,39 @@ async function noteMode($: EngineInterface, mode: string | undefined) {
   if (mode) await update($, main, m => (normalize(DEFAULT_MAIN, m).mode === mode ? normalize(DEFAULT_MAIN, m) : { ...normalize(DEFAULT_MAIN, m), mode }))
 }
 
+/**
+ * One finished main turn into the daily usage log: `$.store` under `usage:<day>`, mirrored to
+ * `~/.claude/agent-office/usage/<day>.json`. A session is filed under the day it started.
+ */
+async function logUsage($: EngineInterface, agentsThisTurn: number) {
+  const [sid, cwd, m, now, fresh, measured] = await Promise.all([$.session.id(), $.session.cwd(), getMain($), $.clock.now(), costNow($), getUsage($)])
+  const cost = fresh ?? measured.costUsd
+  let day = (await read($, sessionDay))?.day ?? ''
+  if (!day) {
+    day = dayOf(now)
+    await update($, sessionDay, () => ({ day }))
+  }
+  const key = `${STORE_PREFIX}${day}`
+  const log = recordTurn(normalizeDay(await $.store.get(key)), sid, { cwd, model: m.model, costUsd: cost, agents: agentsThisTurn, at: now })
+  await $.store.set(key, log)
+  const home = await $.env.get('HOME')
+  if (home) await $.fs.write(`${home}/.claude/agent-office/usage/${day}.json`, `${JSON.stringify(log, null, 2)}\n`)
+}
+
+/** Drops store days past the keeping window; the JSON files stay where they are. */
+async function pruneUsage($: EngineInterface) {
+  const now = await $.clock.now()
+  for (const k of staleKeys(await $.store.keys(), now)) await $.store.delete(k)
+}
+
+/** `/office usage [today|week]`: the log as a table. */
+async function usageText($: EngineInterface, arg: string) {
+  const span = arg === 'week' ? 'week' : 'today'
+  const now = await $.clock.now()
+  const days = await Promise.all(lastDays(now, span === 'week' ? 7 : 1).map(async day => ({ day, log: normalizeDay(await $.store.get(`${STORE_PREFIX}${day}`)) })))
+  return `${usageReport(span, days)}\n\nDaily files: ~/.claude/agent-office/usage/`
+}
+
 /** `/office` (and its alias `/flightdeck`): open, close, reset, or set the layout. */
 async function runOffice($: EngineInterface, cfg: Config, args: string) {
   const [verb = 'open', arg = ''] = args.trim().split(/\s+/)
@@ -232,6 +268,7 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
     await refreshStatus($, cfg)
     return { text: 'Agent Office reset.' }
   }
+  if (verb === 'usage') return { text: await usageText($, arg).catch(() => 'The usage log is not readable in this session.') }
   if (verb === 'layout') {
     const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
     if (!layout) return { text: 'Usage: /office layout auto|compact|wide|mini' }
@@ -256,7 +293,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'office',
       description: 'Agent Office, the live agent dashboard: open, close, reset, or set the layout',
-      argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
+      argumentHint: '[open|close|reset|usage today|week|layout auto|compact|wide|mini]',
     })
     // The upstream name, kept so muscle memory from Flightdeck still works.
     await $.command.register({
@@ -265,6 +302,7 @@ export const register: Register = (on, options) => {
       argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
     })
     await migrate($)
+    void pruneUsage($).catch(() => undefined)
     // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
     const u = await $.session.usage().catch(() => null)
     if (u) {
@@ -545,6 +583,7 @@ export const register: Register = (on, options) => {
         reason: e.reason,
       })
       await update($, receipt, () => r)
+      await logUsage($, r.agents).catch(() => undefined)
       await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: false }))
       // The manager walks back to the desk between turns.
       await update($, errands, x => Object.fromEntries(Object.entries(normalizeErrands(x)).filter(([k]) => k !== 'main')))

@@ -137,6 +137,7 @@ declare module 'claude-code' {
       roster: Roster
       errands: Errands
       alerts: { fired: string[] }
+      sessionDay: { day: string }
     }
   }
 }
