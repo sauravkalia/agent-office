@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+
+- **The building**: `/office building` (or `b`) shows every Claude Code session on the machine, a floor per project with running sessions busy or idle, and the sessions closed in the last 3 days under "gone home" with their last prompt. Reads `~/.claude/sessions/*.json` and `~/.claude/history.jsonl` every 5 s while on screen; never the `.key` files.
+
 ## 0.6.0
 
 - **Supervisor**: each prompt you type is classified locally as light, standard or heavy, and the main loop runs on Haiku, your session model or Opus (high effort) to match. Downgrades happen only when the saving beats the cost of re-caching the conversation; upgrades always happen. `/office route` shows or pins it; `routing: off` turns it off. Shown in the office header and the session log.

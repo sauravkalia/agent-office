@@ -97,7 +97,22 @@ export type Receipt = {
 
 export type Layout = 'auto' | 'compact' | 'wide' | 'mini'
 
-export type View = { expanded: string | null; gateOpen: Bucket | null; layout: Layout | null }
+export type View = {
+  expanded: string | null
+  gateOpen: Bucket | null
+  layout: Layout | null
+  /** Which picture the office panel draws: this session's office, or every session in the building. */
+  scene?: 'office' | 'building'
+}
+
+/** A running session, from Claude Code's session registry. */
+export type LiveSession = { sessionId: string; name: string; cwd: string; status: string; kind: string; updatedAt: number }
+
+/** A session with prompts in the history window, running or not. */
+export type PastSession = { sessionId: string; cwd: string; firstPrompt: string; lastPrompt: string; firstAt: number; lastAt: number; prompts: number }
+
+/** What the last scan of the machine found. */
+export type Building = { live: LiveSession[]; past: PastSession[]; scannedAt: number; historyMtime: number; problem: string | null }
 
 export type Roster = { architectTypes: string[] }
 
@@ -155,6 +170,7 @@ declare module 'claude-code' {
       alerts: { fired: string[] }
       sessionDay: { day: string }
       route: Route
+      building: Building
     }
   }
 }

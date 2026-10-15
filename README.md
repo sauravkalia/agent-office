@@ -69,6 +69,27 @@ Each worker keeps the same name for the session and mutters something about the 
 
 Panels with nothing to show take no room, so a session without subagents shows the office, the main box and the log.
 
+## The building: every session on this machine
+
+`/office building` (or `b` in the pane) swaps the office for the whole building: each project is a floor, each running Claude Code session a person on it, busy (⠿) or idle (z, with how long). The session you're in is ☻ and marked `(here)`. Below, **gone home** lists sessions closed in the last 3 days with their last prompt. `/office office` or `b` again flips back.
+
+```
+building · 9 running · 1 busy · 7 gone home            b: office ▸
+╭ daily-dose ──────────────────╮ ╭ Quilt-Discussion ────────────╮
+│ ☻ ⠿ What is jev (here) · bg  │ │ ☺ z 8m close-error-observab… │
+╰──────────────────────────────╯ ╰──────────────────────────────╯
+╭ gone home · last 3 days ──────────────────────────────────────╮
+│ sphere-v3-web           23h ago  I did some clicks. Please ch… │
+╰───────────────────────────────────────────────────────────────╯
+```
+
+Where it looks, every 5 s while the building is on screen (and never otherwise):
+
+- `~/.claude/sessions/*.json`: Claude Code's registry of running sessions (name, folder, busy/idle). The `.key` files next to them are never read.
+- `~/.claude/history.jsonl`: your prompt history (project, session, time), re-read only when it changes.
+
+Both are Claude Code's own files, not a documented API, so an update could change them; the pane then says what it couldn't read. It only looks: it can't type into another session. A session that crashed leaves its registry file behind, so it shows as idle for as long as that file stays. `$.fs.read` stops at 4 MB, so once your history file grows past that, closed sessions drop out (running ones still show).
+
 ## Supervisor: a model per prompt
 
 Each prompt you type is sorted by its words alone (no model call, no tokens):
@@ -118,6 +139,7 @@ Each finished turn updates that session's entry for the day it started: project,
 | `/office reset` | clear the office, agents, checks, consults, log and the turn |
 | `/office usage [today\|week]` | the usage log as a table |
 | `/office route [auto\|off\|light\|standard\|heavy]` | show or set the supervisor |
+| `/office building` / `/office office` | every session on this machine / back to this session's office (`b` in the pane) |
 | `/office layout auto\|compact\|wide\|mini` | override the layout for this session |
 
 Focus the pane with `ctrl+x tab`, then `1`, `2`, … expand an agent card, and `f` `s` `o` open the gate's file, shell or other drill-down.
@@ -132,7 +154,8 @@ Compared with upstream, Agent Office adds:
 | --- | --- |
 | `$.store` get/set/keys/delete | the daily usage log (this plugin's own store) |
 | `$.fs.write` to `~/.claude/agent-office/usage/` only | the JSON mirror of the usage log |
-| `$.env.get("HOME")` | to find that folder |
+| `$.env.get("HOME")` | to find that folder, and the session files below |
+| `$.fs.list` / `$.fs.read` / `$.fs.stat` on `~/.claude/sessions/*.json` and `~/.claude/history.jsonl` | the building view, only while it's on screen |
 | `$.ui.toast` | budget and context alerts |
 | `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
@@ -184,6 +207,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | [`hooks/office-core.ts`](hooks/office-core.ts) | the office as pure data: tool → room, staff names, quips, the scene |
 | [`hooks/office.tsx`](hooks/office.tsx) | the office drawing, a surface module that animates the hallway on its own frame clock |
 | [`hooks/usage-core.ts`](hooks/usage-core.ts) | the usage log and its report |
+| [`hooks/building-core.ts`](hooks/building-core.ts) | the building: reading the session registry and history, floors and gone-home |
 | [`hooks/supervisor-core.ts`](hooks/supervisor-core.ts) | the Supervisor: prompt tiers, prices, and the switch-or-stay decision |
 | [`hooks/core.ts`](hooks/core.ts) | Flightdeck's reducers and formatters, plus the alert thresholds |
 | [`hooks/rail.tsx`](hooks/rail.tsx), [`hooks/elapsed.tsx`](hooks/elapsed.tsx) | animated connectors and live clocks |

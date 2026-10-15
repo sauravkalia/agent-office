@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentCard, Architect, Bucket, Check, Gate, Layout, LogLine, Loop, Main, Roster, Route, Turn, Usage, View } from '../types'
+import type { AgentCard, Architect, Building, Bucket, LiveSession, Check, Gate, Layout, LogLine, Loop, Main, Roster, Route, Turn, Usage, View } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -62,6 +62,7 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
 import { SESSION, applyTarget, classify, decide } from './supervisor-core'
 import type { Tier } from './supervisor-core'
 import { STORE_PREFIX, dayOf, lastDays, normalizeDay, recordTurn, staleKeys, usageReport } from './usage-core'
@@ -91,6 +92,8 @@ const alerts = atom({ plugin: 'agent-office', key: 'alerts' } as const, { fired:
 const sessionDay = atom({ plugin: 'agent-office', key: 'sessionDay' } as const, { day: '' })
 const DEFAULT_ROUTE: Route = { override: null, current: SESSION, base: null, lastStepAt: 0, pending: null, last: null, savedUsd: 0, switches: 0 }
 const route = atom({ plugin: 'agent-office', key: 'route' } as const, DEFAULT_ROUTE)
+const DEFAULT_BUILDING: Building = { live: [], past: [], scannedAt: 0, historyMtime: 0, problem: null }
+const building = atom({ plugin: 'agent-office', key: 'building' } as const, DEFAULT_BUILDING)
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -304,6 +307,40 @@ async function supervise($: EngineInterface, cfg: Config, text: string, base: No
   if (d.isSwitch || d.note.startsWith('kept')) await say($, 'supervisor', `${c.tier} (${c.why}) ${d.note}`, 'consult')
 }
 
+/**
+ * Looks around the machine: the running sessions in ~/.claude/sessions (only its *.json files; the
+ * .key files beside them are never read), and the history file when it changed since the last look.
+ */
+async function scanBuilding($: EngineInterface) {
+  const home = await $.env.get('HOME')
+  if (!home) return
+  const now = await $.clock.now()
+  const was = normalize(DEFAULT_BUILDING, await read($, building))
+  const live: LiveSession[] = []
+  let problem: string | null = null
+  try {
+    for (const f of await $.fs.list(`${home}/.claude/sessions`)) {
+      if (f.kind !== 'file' || !f.name.endsWith('.json')) continue
+      const s = parseLive(await $.fs.read(`${home}/.claude/sessions/${f.name}`).catch(() => ''))
+      if (s) live.push(s)
+    }
+  } catch {
+    problem = 'the session registry is not readable'
+  }
+  let past = was.past
+  let historyMtime = was.historyMtime
+  try {
+    const st = await $.fs.stat(`${home}/.claude/history.jsonl`)
+    if (st.mtimeMs !== was.historyMtime) {
+      past = parseHistory(await $.fs.read(`${home}/.claude/history.jsonl`), historySince(now))
+      historyMtime = st.mtimeMs
+    }
+  } catch {
+    problem = problem ?? 'the prompt history is not readable (over 4 MB?)'
+  }
+  await update($, building, () => ({ live, past, scannedAt: now, historyMtime, problem }))
+}
+
 /** `/office route [auto|off|light|standard|heavy]`: show or set the supervisor. */
 async function routeText($: EngineInterface, cfg: Config, arg: string) {
   const modes = ['auto', 'off', 'light', 'standard', 'heavy'] as const
@@ -344,6 +381,13 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
     await refreshStatus($, cfg)
     return { text: 'Agent Office reset.' }
   }
+  if (verb === 'building' || verb === 'office') {
+    const scene: 'building' | 'office' = verb
+    await update($, view, v => ({ ...normalize(DEFAULT_VIEW, v), scene }))
+    if (scene === 'building') await scanBuilding($).catch(() => undefined)
+    const opened = await openPane($)
+    return { text: opened.isPlaced ? (scene === 'building' ? 'Showing every session on this machine.' : 'Showing this session\'s office.') : `Not shown yet: ${opened.reason}` }
+  }
   if (verb === 'route') return { text: await routeText($, cfg, arg) }
   if (verb === 'usage') return { text: await usageText($, arg).catch(() => 'The usage log is not readable in this session.') }
   if (verb === 'layout') {
@@ -370,7 +414,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'office',
       description: 'Agent Office, the live agent dashboard: open, close, reset, or set the layout',
-      argumentHint: '[open|close|reset|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
+      argumentHint: '[open|close|reset|building|office|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
     })
     // The upstream name, kept so muscle memory from Flightdeck still works.
     await $.command.register({
@@ -379,6 +423,10 @@ export const register: Register = (on, options) => {
       argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
     })
     await migrate($)
+    // While the building is on screen, look around every 5 s (the history file only when it changed).
+    $.clock.every(5000, async () => {
+      if (normalize(DEFAULT_VIEW, await read($, view)).scene === 'building') await scanBuilding($).catch(() => undefined)
+    })
     void pruneUsage($).catch(() => undefined)
     // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
     const u = await $.session.usage().catch(() => null)
@@ -709,7 +757,7 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const hasClient = 'Client' in els
-    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt] = await Promise.all([
+    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt, bld, selfId] = await Promise.all([
       getMain($),
       getUsage($),
       getArchitect($),
@@ -723,6 +771,8 @@ export const register: Register = (on, options) => {
       $.clock.now(),
       read($, errands).then(normalizeErrands),
       getRoute($),
+      read($, building).then(b => normalize(DEFAULT_BUILDING, b)),
+      $.session.id().catch(() => ''),
     ])
     const W = Math.max(40, e.props.bodyColumns)
     const layout = v.layout ?? cfg.layout
@@ -775,10 +825,86 @@ export const register: Register = (on, options) => {
 
     // ---- office: the main loop as the manager, subagents as staff, each in the room of their errand
     const atWork = people.filter(p => p.mood === 'ok' || p.mood === 'waiting').length
-    const officePanel = (w: number) => (
+    const isBuilding = v.scene === 'building'
+    const sceneButton = (
+      <Button
+        key="scene"
+        plain
+        hotkey="b"
+        label={isBuilding ? 'office ▸' : 'building ▸'}
+        onPress={async () => {
+          const scene: 'office' | 'building' = isBuilding ? 'office' : 'building'
+          await update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), scene }))
+          if (!isBuilding) await scanBuilding($).catch(() => undefined)
+        }}
+      />
+    )
+
+    // ---- building: every session on this machine, a floor per project, the closed ones gone home
+    const bs = buildingScene({ live: bld.live, past: bld.past, selfId })
+    const PER_FLOOR = 4
+    const buildingRows = () => {
+      const perRow = 3
+      let rows = 2
+      for (let i = 0; i < bs.floors.length; i += perRow) {
+        rows += 3 + Math.min(PER_FLOOR, Math.max(1, ...bs.floors.slice(i, i + perRow).map(f => f.people.length)))
+      }
+      return rows + (bs.gone.length > 0 ? 3 + bs.gone.length : 0)
+    }
+    const buildingPanel = (w: number) => {
+      const perRow = w >= 90 ? 3 : w >= 60 ? 2 : 1
+      const floorW = Math.floor((w - (perRow - 1)) / perRow)
+      const rows: (typeof bs.floors)[] = []
+      for (let i = 0; i < bs.floors.length; i += perRow) rows.push(bs.floors.slice(i, i + perRow))
+      return (
+        <Box flexDirection="column" width={w}>
+          <Box justifyContent="space-between" width={w}>
+            <Text bold wrap="truncate">{`building · ${bld.live.length} running · ${bs.busy} busy · ${bs.gone.length} gone home`}</Text>
+            {sceneButton}
+          </Box>
+          {bld.scannedAt === 0 ? <Text color={C.faint}>looking around the building…</Text> : null}
+          {bld.problem ? <Text color={C.amber} wrap="truncate">{bld.problem}</Text> : null}
+          {rows.map(row => {
+            const most = Math.min(PER_FLOOR, Math.max(1, ...row.map(f => f.people.length)))
+            return (
+              <Box columnGap={1}>
+                {row.map(f => (
+                  <Box key={`floor-${f.cwd}`} flexDirection="column" borderStyle="round" borderColor={f.people.some(p => p.isBusy) ? C.main : C.faint} paddingX={1} width={floorW} height={3 + most}>
+                    <Text color={C.dim} bold wrap="truncate">
+                      {f.project}
+                    </Text>
+                    {f.people.slice(0, PER_FLOOR).map(p => (
+                      <Text wrap="truncate" color={p.isBusy ? (p.isSelf ? C.main : C.agent) : C.dim}>
+                        {`${p.isSelf ? '☻' : '☺'} ${p.isBusy ? '⠿' : `z ${agoOf(p.since, now)}`} ${p.title}${p.isSelf ? ' (here)' : ''}${p.kind === 'bg' ? ' · bg' : ''}`}
+                      </Text>
+                    ))}
+                    {f.people.length > PER_FLOOR ? <Text color={C.faint}>{`+${f.people.length - PER_FLOOR} more`}</Text> : null}
+                  </Box>
+                ))}
+              </Box>
+            )
+          })}
+          {bs.gone.length > 0 ? (
+            <Box flexDirection="column" borderStyle="round" borderColor={C.faint} paddingX={1} width={w}>
+              <Text color={C.dim} bold>{`gone home · last ${3} days`}</Text>
+              {bs.gone.map(p => (
+                <Text wrap="truncate">
+                  <Text color={C.text}>{`${projectOf(p.cwd).padEnd(18).slice(0, 18)} `}</Text>
+                  <Text color={C.faint}>{`${agoOf(p.lastAt, now).padStart(8)} ago  `}</Text>
+                  <Text color={C.dim}>{p.lastPrompt || p.firstPrompt || `${plural(p.prompts, 'command')} only`}</Text>
+                </Text>
+              ))}
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
+
+    const officePanel = (w: number) => isBuilding ? buildingPanel(w) : (
       <Box flexDirection="column" width={w}>
         <Box justifyContent="space-between" width={w}>
           <Text bold>{`office · ${atWork} at work`}</Text>
+          {sceneButton}
           {people.some(p => p.mood === 'waiting') ? <Text color={C.amber}>someone needs your signature</Text> : null}
         </Box>
         {modeOf(rt, cfg) !== 'off' && rt.last ? (
@@ -1139,7 +1265,7 @@ export const register: Register = (on, options) => {
 
     // ---- log: whatever rows the other panels leave, 4 to 8
     // The main box's speed line and the gap above the log are a row each.
-    const used = (panels.includes('office') ? 2 + officeRows(people) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+    const used = (panels.includes('office') ? (isBuilding ? buildingRows() : 2 + officeRows(people)) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
     const nLog = logRows(bodyRows, used)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
