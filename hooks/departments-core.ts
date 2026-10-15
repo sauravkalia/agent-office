@@ -23,15 +23,18 @@ export const parseDepartments = (s: string): Department[] =>
 
 const folderOf = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop() ?? ''
 
-export type Desk = { folder: string; session: LiveSession | null; others: LiveSession[] }
+export type Desk = { folder: string; session: LiveSession | null; others: LiveSession[]; isSelf: boolean }
 
-/** Each department's desks: per folder, the most recently active running session there (the HQ session never). */
+/**
+ * Each department's desks: per folder, the session that staffs it. When HQ itself runs in that
+ * folder, HQ is the desk (it does that department's work); otherwise the most recently active one.
+ */
 export const desksOf = (d: Department, live: readonly LiveSession[], selfId: string): Desk[] =>
   d.folders.map(folder => {
-    const here = live
-      .filter(s => s.sessionId !== selfId && folderOf(s.cwd).toLowerCase() === folder.toLowerCase())
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-    return { folder, session: here[0] ?? null, others: here.slice(1) }
+    const here = live.filter(s => folderOf(s.cwd).toLowerCase() === folder.toLowerCase())
+    const self = here.find(s => s.sessionId === selfId)
+    const rest = here.filter(s => s.sessionId !== selfId).sort((a, b) => b.updatedAt - a.updatedAt)
+    return self ? { folder, session: self, others: rest, isSelf: true } : { folder, session: rest[0] ?? null, others: rest.slice(1), isSelf: false }
   })
 
 /** What the supervisor reads when handed a task: who to message for what, and who's not in. */
@@ -44,7 +47,9 @@ export const rosterText = (depts: readonly Department[], live: readonly LiveSess
     lines.push(`- ${d.label}${d.handles ? `: ${d.handles}` : ''}`)
     for (const desk of desksOf(d, live, selfId)) {
       lines.push(
-        desk.session
+        desk.isSelf
+          ? `  - ${desk.folder}: that's you (HQ runs in this folder): do this department's work yourself, here, without SendMessage`
+          : desk.session
           ? `  - ${desk.folder}: "${desk.session.name || desk.session.sessionId}" (${desk.session.status})${desk.others.length > 0 ? `; also open there: ${desk.others.map(o => `"${o.name}"`).join(', ')}` : ''}`
           : `  - ${desk.folder}: not running (the user opens a Claude Code session in the ${desk.folder} folder to staff it)`,
       )

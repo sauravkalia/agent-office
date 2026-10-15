@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.4
+
+- Fix: running `/agent-office:assign` inside a department's own folder (e.g. the Sphere tab in `~/Documents/GitHub`) said that department was "not running". HQ now counts as that department's desk and does the work itself.
+
 ## 0.9.3
 
 - The per-prompt model routing line now reads **model** (it read "supervisor", which is the HQ boss that hands out work).

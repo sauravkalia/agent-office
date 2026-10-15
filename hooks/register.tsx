@@ -984,7 +984,7 @@ export const register: Register = (on, options) => {
         <Box width={w}>
           {depts.map(x => {
             const s = x.desk?.session
-            const state = !s ? '○ not open' : s.status === 'busy' ? '⠿ busy' : `z idle ${agoOf(s.updatedAt, now)}`
+            const state = !s ? '○ not open' : x.desk?.isSelf ? '☻ here (HQ)' : s.status === 'busy' ? '⠿ busy' : `z idle ${agoOf(s.updatedAt, now)}`
             const task = x.last ? (x.last.status === 'replied' ? `✓ ${x.last.reply ?? 'replied'}` : `→ ${x.last.task}`) : ''
             return (
               <Box key={`dept-${x.d.label}`} flexDirection="column" alignItems="center" width={colW}>

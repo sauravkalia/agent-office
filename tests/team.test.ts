@@ -83,16 +83,18 @@ test('departments parse from the option, folders and what each handles', () => {
   expect(parseDepartments('nonsense | =x | A=')).toEqual([])
 })
 
-test('each folder is staffed by its most recently active session, never by HQ itself', () => {
+test('each folder is staffed by its most recently active session, or by HQ when HQ runs there', () => {
   const [pr, sphere, social] = parseDepartments(DEPTS)
   expect(desksOf(pr!, live, 'hq')[0]?.session?.name).toBe('pr-reviews-35')
   expect(desksOf(pr!, live, 'hq')[0]?.others.map(o => o.name)).toEqual(['pr-reviews-1f'])
   expect(desksOf(sphere!, live, 'hq').map(d => d.session?.name ?? null)).toEqual([null, 'sphere-v3-web-9f'])
-  expect(desksOf(social!, live, 'hq')[0]?.session).toBe(null)
+  expect(desksOf(social!, live, 'hq')[0]).toMatchObject({ isSelf: true, session: { name: 'hq' } })
+  expect(desksOf(social!, live.slice(0, 3), 'hq')[0]?.session).toBe(null)
   const roster = rosterText(parseDepartments(DEPTS), live, 'hq', 'hq')
   expect(roster).toContain('- PR Review: reviewing pull requests')
   expect(roster).toContain('pr-reviews: "pr-reviews-35" (idle); also open there: "pr-reviews-1f"')
   expect(roster).toContain('sphere-web: not running')
+  expect(roster).toContain("social-expert: that's you (HQ runs in this folder): do this department's work yourself")
   expect(deptOfSession(parseDepartments(DEPTS), live, 'sphere-v3-web-9f')).toEqual({ label: 'Sphere Dev', folder: 'sphere-v3-web' })
 })
 
