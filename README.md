@@ -114,7 +114,7 @@ Set them in `/config` → agent-office → **Departments**, as `Label=folder,fol
 | --- | --- | --- |
 | PR Review | pr-reviews | reviewing pull requests |
 | Sphere Dev | sphere-web, sphere-v3-web, sphere-iconic-web | coding in the Sphere repos (sent to the repo the task names) |
-| Discussion | Quilt-Discussion | code and design discussion |
+| Quilt Discussion | Quilt-Discussion | Quilt code and design discussion |
 | Social | social-expert | Instagram and YouTube content |
 | Daily Dose | daily-dose | tech questions and what's new |
 

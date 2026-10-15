@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- The Quilt-Discussion department is labelled **Quilt Discussion**.
+
 ## 0.9.0
 
 - **Departments**: the supervisor hands a task to a long-running session you keep open for that area (PR reviews, Sphere repos, discussion, social, daily dose) with `SendMessage`, instead of spawning a new subagent each time. `/agent-office:assign` adds the live roster to the task; the HQ office shows each department's session, busy or idle, with its last task and reply. Configure in `/config` → Departments; preview with `/office departments`.
