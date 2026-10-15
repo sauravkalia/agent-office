@@ -54,6 +54,18 @@ Mods are an early-access Claude Code feature and their API can change between re
 
 Each worker keeps the same name for the session and mutters something about the thing they're working on ("rummaging through aisle 7 for claude code mods", "hammering on src/app.ts"). A failed call is an oops ("blames the intern for…"). The walk is drawn on the surface's own frame clock, so only the office redraws while someone moves. With `motion: off` they teleport. Above the prompt (no fullscreen) the office is one line: `Claude ▸ Workshop · Olu ▸ HR Desk (needs you)`.
 
+## Pixel office (opt-in)
+
+<p align="center"><img src="docs/media/pixel-office.png" alt="The pixel office: eight rooms in two rows with a hallway between, the boss in the meeting room, staff researching in the warehouse, building in the workshop, waiting at the HR desk with a question mark, and on a coffee break" width="640"></p>
+
+`/office pixel` (or `p` in the pane) draws the same office as pixel art: the eight rooms with their furniture (shelves, crates, a workbench that sparks, server racks with blinking lights, the whiteboard, the HR desk, the coffee machine), staff in their own shirt colours (the boss in a tie), `?` over whoever needs your OK, `!` on trouble, a cup on a break, and walkers crossing the hallway. Names and what each person is doing stay as text under the picture.
+
+- **Terminals:** an inline picture over the kitty graphics protocol, in kitty, Ghostty and WezTerm (not inside tmux, which passes no pictures through). It animates about four times a second, only while someone works or walks.
+- **Elsewhere:** the desktop app shows it as an SVG; any terminal that can't show pictures keeps the text office, unchanged. The mod guesses from the terminal's environment and, if drawing a picture is refused, switches back to text by itself.
+- `/office pixel on|off` sets it for the session; `officeStyle: pixel` in `/config` makes it the default.
+
+All art is original and drawn in code (`hooks/pixel-core.ts`); inspired by [Claude-Office](https://github.com/W17ant/Claude-Office), none of its assets are used.
+
 ## Everything else on the pane
 
 | Panel | Shows | From |
@@ -204,6 +216,7 @@ Each finished turn updates that session's entry for the day it started: project,
 | `/office route [auto\|off\|light\|standard\|heavy]` | show or set the supervisor |
 | `/agent-office:assign <task>` | hand a task to the supervisor: a department session, or its team |
 | `/office departments` | which department sessions are running now |
+| `/office pixel [on\|off]` | pixel-art office where the terminal shows pictures (`p` in the pane) |
 | `/office building` / `/office office` | every session on this machine / back to this session's office (`b` in the pane) |
 | `/office layout auto\|compact\|wide\|mini` | override the layout for this session |
 
@@ -222,6 +235,7 @@ Compared with upstream, Agent Office adds:
 | `$.env.get("HOME")` | to find that folder, and the session files below |
 | `$.fs.list` / `$.fs.read` / `$.fs.stat` on `~/.claude/sessions/*.json` and `~/.claude/history.jsonl` | the building view, only while it's on screen |
 | `$.ui.toast` | budget and context alerts |
+| `$.env.get` of `TERM`, `TERM_PROGRAM`, `TMUX`, `KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR`, `WEZTERM_EXECUTABLE`; `$.ui.blit` | the pixel office: whether the terminal shows pictures, and its animation |
 | `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
 `claude plugin validate .` prints exactly what it hooks and calls.
@@ -246,6 +260,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | `routing` | `auto` | the Supervisor: `auto` routes each prompt, `off` keeps the session model |
 | `lightModel` / `heavyModel` | `claude-haiku-4-5` / `claude-opus-5-5` | models for light and heavy prompts |
 | `lightEffort` / `heavyEffort` | `low` / `high` | effort for light and heavy prompts |
+| `officeStyle` | `text` | `pixel` draws the office as pixel art where the terminal shows pictures |
 | `costBudgetUsd` | `5` | session budget for alerts; `0` turns cost alerts off |
 | `costWarnPct` | `50,80,100` | budget percentages that raise a toast |
 | `contextWarnPct` | `70,90` | context-fill percentages that raise a toast |
@@ -270,6 +285,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | --- | --- |
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks, state access, and one function per panel |
 | [`hooks/office-core.ts`](hooks/office-core.ts) | the office as pure data: tool → room, staff names, quips, the scene |
+| [`hooks/pixel-core.ts`](hooks/pixel-core.ts) | the pixel office: framebuffer, original sprites and furniture, a small PNG encoder, terminal detection |
 | [`hooks/office.tsx`](hooks/office.tsx) | the office drawing, a surface module that animates the hallway on its own frame clock |
 | [`hooks/usage-core.ts`](hooks/usage-core.ts) | the usage log and its report |
 | [`hooks/departments-core.ts`](hooks/departments-core.ts) | departments: config, desks per folder, the roster, dispatches and replies |

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+
+- **Pixel office** (opt-in): `/office pixel` or `p` draws the office as original pixel art. It's an inline picture in kitty, Ghostty and WezTerm, animated with `$.ui.blit` while someone works or walks, and an SVG in the desktop app. Terminals that can't show pictures keep the text office unchanged; detection comes from the terminal's environment and is confirmed when a blit is refused. `officeStyle: pixel` makes it the default. The art is drawn in code, so no sprite files are copied.
+
 ## 0.9.4
 
 - Fix: running `/agent-office:assign` inside a department's own folder (e.g. the Sphere tab in `~/Documents/GitHub`) said that department was "not running". HQ now counts as that department's desk and does the work itself.
