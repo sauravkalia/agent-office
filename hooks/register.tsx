@@ -66,7 +66,7 @@ import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive 
 import { SESSION, applyTarget, classify, decide } from './supervisor-core'
 import type { Tier } from './supervisor-core'
 import { STORE_PREFIX, dayOf, lastDays, normalizeDay, recordTurn, staleKeys, usageReport } from './usage-core'
-import { ROOMS, finishErrand, normalizeErrands, officeLine, officeRows, officeScene, roomLabel, startErrand } from './office-core'
+import { ROOMS, finishErrand, namesFor, normalizeErrands, officeLine, officeRows, officeScene, orgLine, roleOf, roomLabel, startErrand, teamOf } from './office-core'
 
 const PANE = 'agent-office'
 const TITLE = 'Agent Office'
@@ -705,6 +705,16 @@ export const register: Register = (on, options) => {
     await update($, agents, list => [...listOf<unknown>(list).map(normalizeCard), card].slice(-24))
     await update($, loops, l => listOf<Loop>(l).filter(x => x.id !== id))
     await say($, shorten(cardTitle(card), 12), `spawned · ${card.type}`, 'info', id)
+    // A handoff: research that finished this turn goes on to whoever builds or documents next.
+    const role = roleOf(card.type)
+    if (role === 'engineering' || role === 'docs') {
+      const [all, t] = await Promise.all([getCards($), getTurn($)])
+      const names = namesFor(all.map(c => c.id))
+      const from = all.filter(c => c.id !== id && c.status === 'done' && (c.endedAt ?? 0) >= t.startedAt && roleOf(c.type) !== role)
+      if (from.length > 0) {
+        await say($, 'supervisor', `handed ${from.map(c => `${names.get(c.id)}'s ${roleOf(c.type)}`).join(' + ')} to ${names.get(id)} (${role})`, 'consult', id)
+      }
+    }
     await refreshStatus($, cfg)
     return started
   })
@@ -905,6 +915,42 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // ---- org chart: the supervisor and the teammates they handed work to
+    const team = teamOf(people, W >= 80 ? 4 : W >= 56 ? 3 : 2)
+    const roleColor = (role?: string) =>
+      role === 'research' ? C.arch : role === 'engineering' ? C.agent : role === 'docs' ? C.cleared : role === 'review' ? C.amber : C.dim
+    const statusText = (p: (typeof people)[number]) =>
+      p.mood === 'waiting' ? '? needs you' : p.status === 'running' ? `⠿ ${roomLabel(p.zone).toLowerCase()}` : p.status === 'done' ? '✓ done' : `✗ ${p.status ?? 'stopped'}`
+    const supervisorModel = rt.base ? prettyModel(rt.current.model ?? rt.base.model) : modelName
+    const orgChart = (w: number) =>
+      team.length === 0 ? null : (
+        <Box flexDirection="column" width={w}>
+          <Box justifyContent="center" width={w}>
+            <Text color={C.main} bold>{`☻ Claude · supervisor`}</Text>
+            <Text color={C.dim}>{` · ${supervisorModel}${m.isRunning ? ' · working' : ''}`}</Text>
+          </Box>
+          <Text color={C.faint}>{orgLine(w, team.length)}</Text>
+          <Box width={w}>
+            {team.map(p => {
+              const colW = Math.floor(w / team.length)
+              return (
+                <Box key={`org-${p.id}`} flexDirection="column" alignItems="center" width={colW}>
+                  <Text color={colorOfPerson(p)} bold wrap="truncate">{`☺ ${p.name}`}</Text>
+                  <Text color={roleColor(p.role)} wrap="truncate">{p.role ?? 'staff'}</Text>
+                  <Text color={p.mood === 'waiting' ? C.amber : p.status === 'running' ? C.agent : p.status === 'done' ? C.gate : C.warn} wrap="truncate">
+                    {statusText(p)}
+                  </Text>
+                  <Text color={C.dim} wrap="truncate">{p.task ?? ''}</Text>
+                </Box>
+              )
+            })}
+          </Box>
+        </Box>
+      )
+    function colorOfPerson(p: (typeof people)[number]) {
+      return p.mood === 'waiting' ? C.amber : p.mood === 'oops' ? C.warn : p.mood === 'done' ? C.gate : C.agent
+    }
+
     const officePanel = (w: number) => isBuilding ? buildingPanel(w) : (
       <Box flexDirection="column" width={w}>
         <Box justifyContent="space-between" width={w}>
@@ -918,6 +964,7 @@ export const register: Register = (on, options) => {
             <Text color={C.dim}>{`${rt.last.tier} (${rt.last.why}) ${rt.last.note}`}</Text>
           </Text>
         ) : null}
+        {orgChart(w)}
         {hasClient ? (
           <els.Client
             key="office"
@@ -1270,7 +1317,7 @@ export const register: Register = (on, options) => {
 
     // ---- log: whatever rows the other panels leave, 4 to 8
     // The main box's speed line and the gap above the log are a row each.
-    const used = (panels.includes('office') ? (isBuilding ? buildingRows() : 2 + officeRows(people)) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+    const used = (panels.includes('office') ? (isBuilding ? buildingRows() : 2 + officeRows(people) + (team.length > 0 ? 6 : 0)) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
     const nLog = logRows(bodyRows, used)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)

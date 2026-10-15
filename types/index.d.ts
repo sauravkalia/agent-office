@@ -149,6 +149,12 @@ export type Person = {
   mood: 'ok' | 'idle' | 'waiting' | 'oops' | 'done'
   isBoss: boolean
   quip: string
+  /** The teammate's job, from their agent type: research, engineering, docs, review, planning; staff otherwise. */
+  role?: string
+  /** The task the supervisor gave them, for the org chart. */
+  task?: string
+  /** Their card's status: running, done, failed, stopped. */
+  status?: string
 }
 
 declare module 'claude-code' {

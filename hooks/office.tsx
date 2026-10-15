@@ -156,7 +156,7 @@ const Office: ClientModule<Props, State> = (props, surface) => {
       {roomRow(props.rooms.slice(COLS, COLS * 2))}
       {chatter.map(p => (
         <Text wrap="truncate">
-          <Text color={colorOf(p)} bold>{`${p.name}: `}</Text>
+          <Text color={colorOf(p)} bold>{`${p.name}${p.role && p.role !== 'staff' ? ` (${p.role})` : ''}: `}</Text>
           <Text color={C.text}>{isWalking(p.id) ? `heading to the ${labelOf(p.zone)}…` : p.quip}</Text>
         </Text>
       ))}

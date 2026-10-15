@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- **The team**: three teammate agents ship with the mod (`researcher`, `engineer`, `docs-writer`) and `/agent-office:assign <task>` hands a task to the supervisor, who plans it, runs research, passes the findings to the engineer and has docs updated, without pushing or opening PRs unless asked.
+- **Org chart** above the office floor: the supervisor and up to four teammates with their role, status and task; the log notes each handoff.
+
 ## 0.7.0
 
 - **The building**: `/office building` (or `b`) shows every Claude Code session on the machine, a floor per project with running sessions busy or idle, and the sessions closed in the last 3 days under "gone home" with their last prompt. Reads `~/.claude/sessions/*.json` and `~/.claude/history.jsonl` every 5 s while on screen; never the `.key` files.

@@ -68,6 +68,24 @@ export const namesFor = (ids: readonly string[]): Map<string, string> => {
   return out
 }
 
+// ---------------------------------------------------------------- roles
+
+/** A teammate's job from their agent type: `agent-office:researcher` → research, `Explore` → research… */
+export const roleOf = (type: string): string => {
+  const t = type.toLowerCase()
+  return /research|explore|search|scout/.test(t)
+    ? 'research'
+    : /engineer|develop|builder|coder|implement/.test(t)
+      ? 'engineering'
+      : /docs?\b|docs-|writer|document/.test(t)
+        ? 'docs'
+        : /review|audit|qa|test/.test(t)
+          ? 'review'
+          : /plan|architect|advisor/.test(t)
+            ? 'planning'
+            : 'staff'
+}
+
 // ---------------------------------------------------------------- quips
 
 type Mood = Person['mood']
@@ -193,6 +211,9 @@ export const officeScene = (s: SceneInput): Person[] => {
       zone: p.zone,
       mood: p.mood,
       isBoss: false,
+      role: roleOf(c.type),
+      task: shorten(c.description || c.type, 60),
+      status: c.status,
       quip: quipOf(p.zone, p.mood, seed, whatOf(errand) || shorten(c.description, 28), c.status),
     })
   }
@@ -208,6 +229,30 @@ export const officeRows = (people: readonly Person[]) => {
   const top = ROOMS.slice(0, 4).map(r => r.zone)
   const bottom = ROOMS.slice(4).map(r => r.zone)
   return 3 + tallest(top) + 1 + 3 + tallest(bottom) + Math.min(5, people.length)
+}
+
+/** The supervisor's team for the org chart: the newest teammates, running ones first, at most `max`. */
+export const teamOf = (people: readonly Person[], max: number) => {
+  const staff = people.filter(p => !p.isBoss && p.id !== 'architect')
+  const running = staff.filter(p => p.status === 'running')
+  const rest = staff.filter(p => p.status !== 'running')
+  return [...running, ...rest.slice(-Math.max(0, max - running.length))].slice(0, max)
+}
+
+/** The org chart's connector: one line from the supervisor's centre down to each teammate's column. */
+export const orgLine = (width: number, n: number) => {
+  if (n <= 0 || width <= 0) return ''
+  const col = Math.floor(width / n)
+  const centers = Array.from({ length: n }, (_, i) => i * col + Math.floor(col / 2))
+  const boss = Math.floor(width / 2)
+  const cells = Array.from({ length: width }, () => ' ')
+  const from = Math.min(centers[0] ?? boss, boss)
+  const to = Math.max(centers[n - 1] ?? boss, boss)
+  for (let i = from; i <= to; i += 1) cells[i] = '─'
+  for (const c of centers) cells[c] = c === from ? '┌' : c === to ? '┐' : '┬'
+  if (n === 1 && centers[0] === boss) cells[boss] = '│'
+  else cells[boss] = centers.includes(boss) ? '┼' : boss === from ? '└' : boss === to ? '┘' : '┴'
+  return cells.join('').trimEnd()
 }
 
 /** The office on one line, for the summary above the prompt: `Claude ▸ Workshop · Priya ▸ Warehouse`. */

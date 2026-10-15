@@ -69,6 +69,33 @@ Each worker keeps the same name for the session and mutters something about the 
 
 Panels with nothing to show take no room, so a session without subagents shows the office, the main box and the log.
 
+## The team: a supervisor who delegates
+
+Hand the supervisor a task and it splits the work between three teammates that ship with the mod:
+
+```
+/agent-office:assign add CSV export to the reports page
+```
+
+| Teammate | Agent type | Does | Model | Can edit |
+| --- | --- | --- | --- | --- |
+| researcher | `agent-office:researcher` | reads the code (and the web if needed), reports findings with `file:line` | Sonnet | no |
+| engineer | `agent-office:engineer` | builds from the findings, runs the checks, reports what changed | your session's | yes |
+| docs writer | `agent-office:docs-writer` | updates README, docs and changelog to match | Sonnet | docs only |
+
+The supervisor (the main loop) plans first and skips a teammate the task doesn't need, waits for research, pastes the findings into the engineer's brief, then runs docs. It never pushes or opens a PR unless you ask. The office shows the org chart above the floor:
+
+```
+                 ☻ Claude · supervisor · Opus 5.5
+                ┌────────────────┴───────────────┐
+              ☺ Olu                            ☺ Raj
+            research                        engineering
+             ✓ done                           ⠿ workshop
+     Research today.sh style              Build greet.sh
+```
+
+and the log says when findings change hands: `supervisor  handed Olu's research to Raj (engineering)`. Any agent type shows on the chart with a role read from its name (`Explore` → research, a `*reviewer` → review, `Plan` → planning). Edit the teammates in [`agents/`](agents) and the supervisor's playbook in [`commands/assign.md`](commands/assign.md).
+
 ## The building: every session on this machine
 
 `/office building` (or `b` in the pane) swaps the office for the whole building: each project is a floor, each running Claude Code session a person on it, busy (⠿) or idle (z, with how long). The session you're in is ☻ and marked `(here)`. Below, **gone home** lists sessions closed in the last 3 days with their last prompt. `/office office` or `b` again flips back.
@@ -139,6 +166,7 @@ Each finished turn updates that session's entry for the day it started: project,
 | `/office reset` | clear the office, agents, checks, consults, log and the turn |
 | `/office usage [today\|week]` | the usage log as a table |
 | `/office route [auto\|off\|light\|standard\|heavy]` | show or set the supervisor |
+| `/agent-office:assign <task>` | hand a task to the supervisor and its team |
 | `/office building` / `/office office` | every session on this machine / back to this session's office (`b` in the pane) |
 | `/office layout auto\|compact\|wide\|mini` | override the layout for this session |
 
