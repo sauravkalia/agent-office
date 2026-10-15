@@ -1,5 +1,5 @@
 ---
-description: Hand a task to the office supervisor, who splits it between the research, engineering and docs teammates
+description: Hand a task to the office supervisor, who splits it between the research, engineering, docs and review teammates
 argument-hint: <the task, e.g. "add CSV export to the reports page">
 ---
 
@@ -8,6 +8,13 @@ You are the supervisor in Agent Office. Run this task through your team instead 
 <task>
 $ARGUMENTS
 </task>
+
+**If the task is reviewing a pull request or a diff**, run the review path instead of steps 1–5:
+- Spawn the `reviewer` agent with the PR (URL or number) and anything the user asked to focus on. For a large PR (many files or areas), split it: one `reviewer` per area, in parallel, each told which files are theirs.
+- When they report, merge and de-duplicate the findings, rank them by severity, and show the user the verdict, the findings with `file:line`, and the draft inline comments.
+- Don't post comments, request changes or approve on GitHub until the user says so. When they do, post the draft comments as **inline comments on the lines they refer to** (not one summary comment).
+
+Otherwise:
 
 1. **Plan.** In two or three lines, say what research, engineering and docs work this needs. Skip a teammate the task doesn't need (a pure docs fix needs no engineer; a one-line fix needs no research).
 2. **Research.** Spawn the `researcher` agent with a focused brief: the task, what to find out, which areas of the code to look at. Wait for its findings.

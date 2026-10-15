@@ -82,6 +82,9 @@ Hand the supervisor a task and it splits the work between three teammates that s
 | researcher | `agent-office:researcher` | reads the code (and the web if needed), reports findings with `file:line` | Sonnet | no |
 | engineer | `agent-office:engineer` | builds from the findings, runs the checks, reports what changed | your session's | yes |
 | docs writer | `agent-office:docs-writer` | updates README, docs and changelog to match | Sonnet | docs only |
+| reviewer | `agent-office:reviewer` | reviews a PR or diff (`gh pr diff`, read-only), returns ranked findings and draft inline comments | your session's | no |
+
+For a review (`/agent-office:assign review https://github.com/org/repo/pull/504`) the supervisor runs reviewers instead (one per area on a big PR, in parallel) and shows you the findings; it posts inline comments only when you say so.
 
 The supervisor (the main loop) plans first and skips a teammate the task doesn't need, waits for research, pastes the findings into the engineer's brief, then runs docs. It never pushes or opens a PR unless you ask. The office shows the org chart above the floor:
 

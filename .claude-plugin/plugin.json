@@ -1,6 +1,6 @@
 {
   "name": "agent-office",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Agent Office: your session's agents as office staff who walk to the warehouse, archives or workshop as they work, plus a live dashboard of context, cost, permissions and subagents. Forked from Flightdeck by Stephen Casella",
   "author": {
     "name": "Saurav Kalia",

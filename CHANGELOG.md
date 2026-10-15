@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- **reviewer** teammate and a review path in `/agent-office:assign`: PR reviews go to read-only reviewers (split by area on big PRs), findings come back ranked with draft inline comments, nothing is posted until you agree.
+
 ## 0.8.0
 
 - **The team**: three teammate agents ship with the mod (`researcher`, `engineer`, `docs-writer`) and `/agent-office:assign <task>` hands a task to the supervisor, who plans it, runs research, passes the findings to the engineer and has docs updated, without pushing or opening PRs unless asked.
