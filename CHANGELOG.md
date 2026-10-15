@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+- **Departments**: the supervisor hands a task to a long-running session you keep open for that area (PR reviews, Sphere repos, discussion, social, daily dose) with `SendMessage`, instead of spawning a new subagent each time. `/agent-office:assign` adds the live roster to the task; the HQ office shows each department's session, busy or idle, with its last task and reply. Configure in `/config` → Departments; preview with `/office departments`.
+
 ## 0.8.1
 
 - **reviewer** teammate and a review path in `/agent-office:assign`: PR reviews go to read-only reviewers (split by area on big PRs), findings come back ranked with draft inline comments, nothing is posted until you agree.

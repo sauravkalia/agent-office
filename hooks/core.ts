@@ -22,6 +22,8 @@ import type {
 } from '../types'
 
 import type { Effort, SupervisorConfig } from './supervisor-core'
+import { parseDepartments } from './departments-core'
+import type { Department } from './departments-core'
 
 export const SCHEMA_VERSION = 2
 
@@ -118,6 +120,8 @@ export type Config = {
   /** The supervisor: route each prompt to a model and effort, or leave the session's own. */
   routing: 'auto' | 'off'
   supervisor: SupervisorConfig
+  /** Long-running sessions the supervisor delegates to, from the `departments` option. */
+  departments: Department[]
 }
 
 /** `"80, 50,x,120"` → `[50, 80]`: whole percentages from 1 to 100, sorted, each once. */
@@ -164,6 +168,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     costWarnPct: percentList(str('costWarnPct', ''), [50, 80, 100]),
     contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
     routing: str('routing', 'auto') === 'off' ? 'off' : 'auto',
+    departments: parseDepartments(typeof o.departments === 'string' ? o.departments : ''),
     supervisor: {
       lightModel: str('lightModel', 'claude-haiku-4-5'),
       heavyModel: str('heavyModel', 'claude-opus-5-5'),

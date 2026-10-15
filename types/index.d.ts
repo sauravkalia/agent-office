@@ -111,6 +111,19 @@ export type LiveSession = { sessionId: string; name: string; cwd: string; status
 /** A session with prompts in the history window, running or not. */
 export type PastSession = { sessionId: string; cwd: string; firstPrompt: string; lastPrompt: string; firstAt: number; lastAt: number; prompts: number }
 
+/** A task the supervisor handed to a department's session, and what came back. */
+export type Dispatch = {
+  /** The session name it went to. */
+  to: string
+  dept: string
+  folder: string
+  task: string
+  at: number
+  status: 'sent' | 'replied'
+  reply?: string
+  endedAt?: number
+}
+
 /** What the last scan of the machine found. */
 export type Building = { live: LiveSession[]; past: PastSession[]; scannedAt: number; historyMtime: number; problem: string | null }
 
@@ -177,6 +190,7 @@ declare module 'claude-code' {
       sessionDay: { day: string }
       route: Route
       building: Building
+      dispatches: Dispatch[]
     }
   }
 }

@@ -99,6 +99,39 @@ The supervisor (the main loop) plans first and skips a teammate the task doesn't
 
 and the log says when findings change hands: `supervisor  handed Olu's research to Raj (engineering)`. Any agent type shows on the chart with a role read from its name (`Explore` → research, a `*reviewer` → review, `Plan` → planning). Edit the teammates in [`agents/`](agents) and the supervisor's playbook in [`commands/assign.md`](commands/assign.md).
 
+## Departments: one HQ session, your long-running sessions as departments
+
+Instead of spawning fresh subagents, the supervisor can hand a task to a session you already keep open for that area, which keeps its own history, repo and CLAUDE.md:
+
+```
+/agent-office:assign review https://github.com/QuiltAI/sphere-v3-web/pull/504
+→ supervisor  → PR Review (pr-reviews-35): review https://github.com/QuiltAI/sphere-v3-web/pull/504
+```
+
+Set them in `/config` → agent-office → **Departments**, as `Label=folder,folder: what it handles`, separated by `|`. The default:
+
+| Department | Folders | Handles |
+| --- | --- | --- |
+| PR Review | pr-reviews | reviewing pull requests |
+| Sphere Dev | sphere-web, sphere-v3-web, sphere-iconic-web | coding in the Sphere repos (sent to the repo the task names) |
+| Discussion | Quilt-Discussion | code and design discussion |
+| Social | social-expert | Instagram and YouTube content |
+| Daily Dose | daily-dose | tech questions and what's new |
+
+How it works:
+
+- `/agent-office:assign` looks up which sessions are running in those folders (Claude Code's session registry) and adds the list to the task. In a folder with two sessions open, the most recently active one gets the work. `/office departments` shows the same list.
+- The supervisor sends the task to that session with `SendMessage` (a self-contained brief starting `Task from HQ:`), tells you where it went, and carries on. The department works in its own terminal and replies; the reply shows in HQ's log and on the department's desk.
+- Once a session has sent work out, its office shows the departments under the supervisor: each one's session, busy (⠿) or idle, and the last task (`→ …`) or reply (`✓ …`).
+- If a department's session isn't open, the supervisor says so and offers to do it with the team instead.
+
+What to know:
+
+- **Keep departments open.** HQ can message a running session, not start a closed one.
+- **Same permission mode.** A session in a different permission mode than HQ holds incoming messages until you approve them there. Permission prompts for the work itself appear in the department's terminal.
+- **Departments treat HQ as a teammate.** They do the work within their own permissions, and won't push, post or merge on HQ's say-so alone; the playbook doesn't ask them to.
+- The department list appears in your prompt line in HQ's transcript; that's how it reaches the supervisor.
+
 ## The building: every session on this machine
 
 `/office building` (or `b` in the pane) swaps the office for the whole building: each project is a floor, each running Claude Code session a person on it, busy (⠿) or idle (z, with how long). The session you're in is ☻ and marked `(here)`. Below, **gone home** lists sessions closed in the last 3 days with their last prompt. `/office office` or `b` again flips back.
@@ -169,7 +202,8 @@ Each finished turn updates that session's entry for the day it started: project,
 | `/office reset` | clear the office, agents, checks, consults, log and the turn |
 | `/office usage [today\|week]` | the usage log as a table |
 | `/office route [auto\|off\|light\|standard\|heavy]` | show or set the supervisor |
-| `/agent-office:assign <task>` | hand a task to the supervisor and its team |
+| `/agent-office:assign <task>` | hand a task to the supervisor: a department session, or its team |
+| `/office departments` | which department sessions are running now |
 | `/office building` / `/office office` | every session on this machine / back to this session's office (`b` in the pane) |
 | `/office layout auto\|compact\|wide\|mini` | override the layout for this session |
 
@@ -238,6 +272,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | [`hooks/office-core.ts`](hooks/office-core.ts) | the office as pure data: tool → room, staff names, quips, the scene |
 | [`hooks/office.tsx`](hooks/office.tsx) | the office drawing, a surface module that animates the hallway on its own frame clock |
 | [`hooks/usage-core.ts`](hooks/usage-core.ts) | the usage log and its report |
+| [`hooks/departments-core.ts`](hooks/departments-core.ts) | departments: config, desks per folder, the roster, dispatches and replies |
 | [`hooks/building-core.ts`](hooks/building-core.ts) | the building: reading the session registry and history, floors and gone-home |
 | [`hooks/supervisor-core.ts`](hooks/supervisor-core.ts) | the Supervisor: prompt tiers, prices, and the switch-or-stay decision |
 | [`hooks/core.ts`](hooks/core.ts) | Flightdeck's reducers and formatters, plus the alert thresholds |

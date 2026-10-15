@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentCard, Architect, Building, Bucket, LiveSession, Check, Gate, Layout, LogLine, Loop, Main, Roster, Route, Turn, Usage, View } from '../types'
+import type { AgentCard, Architect, Building, Bucket, Dispatch, LiveSession, Check, Gate, Layout, LogLine, Loop, Main, Roster, Route, Turn, Usage, View } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -62,6 +62,7 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { answerDispatch, crossMessageOf, deptOfSession, desksOf, rosterText } from './departments-core'
 import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
 import { SESSION, applyTarget, classify, decide } from './supervisor-core'
 import type { Tier } from './supervisor-core'
@@ -94,6 +95,7 @@ const DEFAULT_ROUTE: Route = { override: null, current: SESSION, base: null, las
 const route = atom({ plugin: 'agent-office', key: 'route' } as const, DEFAULT_ROUTE)
 const DEFAULT_BUILDING: Building = { live: [], past: [], scannedAt: 0, historyMtime: 0, problem: null }
 const building = atom({ plugin: 'agent-office', key: 'building' } as const, DEFAULT_BUILDING)
+const dispatches = atom({ plugin: 'agent-office', key: 'dispatches' } as const, [])
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -225,6 +227,7 @@ async function resetAll($: EngineInterface) {
   await update($, errands, () => ({}))
   await update($, alerts, () => ({ fired: [] }))
   await update($, sessionDay, () => ({ day: '' }))
+  await update($, dispatches, () => [])
   await update($, route, r => ({ ...DEFAULT_ROUTE, override: normalize(DEFAULT_ROUTE, r).override, savedUsd: normalize(DEFAULT_ROUTE, r).savedUsd }))
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null }))
@@ -311,7 +314,7 @@ async function supervise($: EngineInterface, cfg: Config, text: string, base: No
  * Looks around the machine: the running sessions in ~/.claude/sessions (only its *.json files; the
  * .key files beside them are never read), and the history file when it changed since the last look.
  */
-async function scanBuilding($: EngineInterface) {
+async function scanBuilding($: EngineInterface, withHistory = true) {
   const home = await $.env.get('HOME')
   if (!home) return
   const now = await $.clock.now()
@@ -329,14 +332,16 @@ async function scanBuilding($: EngineInterface) {
   }
   let past = was.past
   let historyMtime = was.historyMtime
-  try {
-    const st = await $.fs.stat(`${home}/.claude/history.jsonl`)
-    if (st.mtimeMs !== was.historyMtime) {
-      past = parseHistory(await $.fs.read(`${home}/.claude/history.jsonl`), historySince(now))
-      historyMtime = st.mtimeMs
+  if (withHistory) {
+    try {
+      const st = await $.fs.stat(`${home}/.claude/history.jsonl`)
+      if (st.mtimeMs !== was.historyMtime) {
+        past = parseHistory(await $.fs.read(`${home}/.claude/history.jsonl`), historySince(now))
+        historyMtime = st.mtimeMs
+      }
+    } catch {
+      problem = problem ?? 'the prompt history is not readable (over 4 MB?)'
     }
-  } catch {
-    problem = problem ?? 'the prompt history is not readable (over 4 MB?)'
   }
   await update($, building, () => ({ live, past, scannedAt: now, historyMtime, problem }))
 }
@@ -389,6 +394,12 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
     return { text: opened.isPlaced ? (scene === 'building' ? 'Showing every session on this machine.' : 'Showing this session\'s office.') : `Not shown yet: ${opened.reason}` }
   }
   if (verb === 'route') return { text: await routeText($, cfg, arg) }
+  if (verb === 'departments') {
+    if (cfg.departments.length === 0) return { text: 'No departments set. Add them in /config → agent-office → Departments.' }
+    await scanBuilding($, false).catch(() => undefined)
+    const [b, selfId] = await Promise.all([read($, building).then(x => normalize(DEFAULT_BUILDING, x)), $.session.id().catch(() => '')])
+    return { text: rosterText(cfg.departments, b.live, selfId, b.live.find(s => s.sessionId === selfId)?.name ?? '') }
+  }
   if (verb === 'usage') return { text: await usageText($, arg).catch(() => 'The usage log is not readable in this session.') }
   if (verb === 'layout') {
     const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
@@ -414,7 +425,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'office',
       description: 'Agent Office, the live agent dashboard: open, close, reset, or set the layout',
-      argumentHint: '[open|close|reset|building|office|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
+      argumentHint: '[open|close|reset|building|office|departments|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
     })
     // The upstream name, kept so muscle memory from Flightdeck still works.
     await $.command.register({
@@ -423,9 +434,11 @@ export const register: Register = (on, options) => {
       argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
     })
     await migrate($)
-    // While the building is on screen, look around every 5 s (the history file only when it changed).
+    // Every 5 s: the whole building while it's on screen (history only when it changed); otherwise
+    // just the running sessions, when there are departments to staff.
     $.clock.every(5000, async () => {
-      if (normalize(DEFAULT_VIEW, await read($, view)).scene === 'building') await scanBuilding($).catch(() => undefined)
+      const isBuilding = normalize(DEFAULT_VIEW, await read($, view)).scene === 'building'
+      if (isBuilding || cfg.departments.length > 0) await scanBuilding($, isBuilding).catch(() => undefined)
     })
     void pruneUsage($).catch(() => undefined)
     // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
@@ -456,6 +469,18 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'office' }, ($, e) => runOffice($, cfg, e.args))
   on('command.run', { command: 'flightdeck' }, ($, e) => runOffice($, cfg, e.args))
 
+  // Handing a task to the supervisor: it reads which department sessions are running right now.
+  // The roster rides in the command's arguments, which the playbook's prompt carries to the model.
+  on('command.run', async ($, e, next) => {
+    if (!/(^|:)assign$/.test(e.command) || cfg.departments.length === 0) return next(e)
+    await scanBuilding($, false).catch(() => undefined)
+    const [b, selfId] = await Promise.all([read($, building).then(x => normalize(DEFAULT_BUILDING, x)), $.session.id().catch(() => '')])
+    const hqName = b.live.find(s => s.sessionId === selfId)?.name ?? ''
+    const staffed = cfg.departments.filter(d => desksOf(d, b.live, selfId).some(k => k.session)).length
+    await say($, 'supervisor', `${staffed} of ${cfg.departments.length} departments on call`, 'consult')
+    return next({ ...e, args: `${e.args}\n\n<departments>\n${rosterText(cfg.departments, b.live, selfId, hqName)}\n</departments>` })
+  })
+
   on('classic.UserPromptSubmit', async ($, e, next) => {
     await noteMode($, e.permission_mode)
     return next(e)
@@ -485,7 +510,15 @@ export const register: Register = (on, options) => {
       if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
     } else if (e.text) {
       const p = promptLine(e.text)
-      await say($, p.who, p.text)
+      const cross = crossMessageOf(e.text)
+      if (cross) {
+        const at = await $.clock.now()
+        const list = listOf<Dispatch>(await read($, dispatches))
+        if (list.some(x => x.to === cross.fromName && x.status === 'sent')) {
+          await update($, dispatches, l => answerDispatch(listOf<Dispatch>(l), cross.fromName, cross.body, at))
+        }
+        await say($, cross.fromName || 'peer', `replied: ${cross.body}`, 'done')
+      } else await say($, p.who, p.text)
       // Only what you typed is routed; the engine's own turns carry on as they were.
       await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), pending: p.who === 'you' ? e.text ?? null : null }))
     }
@@ -631,6 +664,19 @@ export const register: Register = (on, options) => {
       if (isSettled) await refreshStatus($, cfg)
       return ran
     }
+    if (String(e.tool) === 'SendMessage' && !e.agentId && didRun && ran.isError !== true) {
+      const input = e as unknown as { to?: unknown; message?: unknown }
+      const to = typeof input.to === 'string' ? input.to.replace(/\s*\[[0-9a-f]+\]$/i, '') : ''
+      const message = typeof input.message === 'string' ? input.message : ''
+      const b = normalize(DEFAULT_BUILDING, await read($, building))
+      const where = deptOfSession(cfg.departments, b.live, to)
+      if (to && where) {
+        const task = shorten(message.split('\n').map(l => l.replace(/^task from hq:\s*/i, '').trim()).find(Boolean) ?? '', 70)
+        const d: Dispatch = { to, dept: where.label, folder: where.folder, task, at: await $.clock.now(), status: 'sent' }
+        await update($, dispatches, l => [...listOf<Dispatch>(l), d].slice(-30))
+        await say($, 'supervisor', `→ ${where.label} (${to}): ${task}`, 'consult')
+      }
+    }
     const hasFailed = didRun && ran.isError === true
     const isEdit = !hasFailed && didRun && EDIT_TOOLS.has(e.tool)
     const t0 = await getTurn($)
@@ -767,7 +813,7 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const hasClient = 'Client' in els
-    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt, bld, selfId] = await Promise.all([
+    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt, bld, selfId, sent] = await Promise.all([
       getMain($),
       getUsage($),
       getArchitect($),
@@ -783,6 +829,7 @@ export const register: Register = (on, options) => {
       getRoute($),
       read($, building).then(b => normalize(DEFAULT_BUILDING, b)),
       $.session.id().catch(() => ''),
+      read($, dispatches).then(x => listOf<Dispatch>(x)),
     ])
     const W = Math.max(40, e.props.bodyColumns)
     const layout = v.layout ?? cfg.layout
@@ -922,15 +969,47 @@ export const register: Register = (on, options) => {
     const statusText = (p: (typeof people)[number]) =>
       p.mood === 'waiting' ? '? needs you' : p.status === 'running' ? `⠿ ${roomLabel(p.zone).toLowerCase()}` : p.status === 'done' ? '✓ done' : `✗ ${p.status ?? 'stopped'}`
     const supervisorModel = rt.base ? prettyModel(rt.current.model ?? rt.base.model) : modelName
+    // Departments: each one's desks (running sessions), busiest first, and the last task it was given.
+    // Only an HQ, a session that has handed work out, draws the departments; the departments themselves don't.
+    const depts = (sent.length > 0 ? cfg.departments : []).map(d => {
+      const desks = desksOf(d, bld.live, selfId)
+      const staffed = desks.filter(k => k.session)
+      const busy = staffed.find(k => k.session?.status === 'busy')
+      const last = [...sent].reverse().find(x => x.dept === d.label)
+      return { d, desk: busy ?? staffed[0] ?? null, staffed: staffed.length, open: desks.length, last }
+    })
+    const deptRow = (w: number) => {
+      const colW = Math.floor(w / Math.max(1, depts.length))
+      return (
+        <Box width={w}>
+          {depts.map(x => {
+            const s = x.desk?.session
+            const state = !s ? '○ not open' : s.status === 'busy' ? '⠿ busy' : `z idle ${agoOf(s.updatedAt, now)}`
+            const task = x.last ? (x.last.status === 'replied' ? `✓ ${x.last.reply ?? 'replied'}` : `→ ${x.last.task}`) : ''
+            return (
+              <Box key={`dept-${x.d.label}`} flexDirection="column" alignItems="center" width={colW}>
+                <Text color={s ? C.text : C.faint} bold wrap="truncate">{x.d.label}</Text>
+                <Text color={!s ? C.faint : s.status === 'busy' ? C.agent : C.dim} wrap="truncate">{state}</Text>
+                <Text color={C.faint} wrap="truncate">{s ? `${s.name}${x.open > 1 ? ` +${x.staffed - 1}/${x.open - 1}` : ''}` : x.d.folders.join(', ')}</Text>
+                <Text color={x.last?.status === 'replied' ? C.gate : C.amber} wrap="truncate">{task}</Text>
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
     const orgChart = (w: number) =>
-      team.length === 0 ? null : (
+      team.length === 0 && depts.length === 0 ? null : (
         <Box flexDirection="column" width={w}>
           <Box justifyContent="center" width={w}>
-            <Text color={C.main} bold>{`☻ Claude · supervisor`}</Text>
+            <Text color={C.main} bold>{`☻ Claude · ${depts.length > 0 ? 'HQ supervisor' : 'supervisor'}`}</Text>
             <Text color={C.dim}>{` · ${supervisorModel}${m.isRunning ? ' · working' : ''}`}</Text>
           </Box>
-          <Text color={C.faint}>{orgLine(w, team.length)}</Text>
-          <Box width={w}>
+          {depts.length > 0 ? <Text color={C.faint}>{orgLine(w, depts.length)}</Text> : null}
+          {depts.length > 0 ? deptRow(w) : null}
+          {team.length > 0 && depts.length > 0 ? <Text color={C.dim}>{'team (subagents)'}</Text> : null}
+          {team.length > 0 ? <Text color={C.faint}>{orgLine(w, team.length)}</Text> : null}
+          {team.length === 0 ? null : <Box width={w}>
             {team.map(p => {
               const colW = Math.floor(w / team.length)
               return (
@@ -944,7 +1023,7 @@ export const register: Register = (on, options) => {
                 </Box>
               )
             })}
-          </Box>
+          </Box>}
         </Box>
       )
     function colorOfPerson(p: (typeof people)[number]) {
@@ -1317,7 +1396,7 @@ export const register: Register = (on, options) => {
 
     // ---- log: whatever rows the other panels leave, 4 to 8
     // The main box's speed line and the gap above the log are a row each.
-    const used = (panels.includes('office') ? (isBuilding ? buildingRows() : 2 + officeRows(people) + (team.length > 0 ? 6 : 0)) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+    const used = (panels.includes('office') ? (isBuilding ? buildingRows() : 2 + officeRows(people) + (team.length > 0 || depts.length > 0 ? 2 : 0) + (depts.length > 0 ? 4 : 0) + (team.length > 0 ? 5 : 0)) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
     const nLog = logRows(bodyRows, used)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)

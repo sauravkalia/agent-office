@@ -61,3 +61,72 @@ test('the supervisor hands research to the engineer, and the org chart shows the
   expect(await ui.find({ text: new RegExp(`handed ${names.get('res1')}'s research to ${names.get('eng1')} \\(engineering\\)`) })).toBeDefined()
   await ui.unmount()
 })
+
+// ---------------------------------------------------------------- departments
+
+import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, rosterText } from '../hooks/departments-core'
+
+const DEPTS = 'PR Review=pr-reviews: reviewing pull requests | Sphere Dev=sphere-web,sphere-v3-web: Sphere coding | Social=social-expert'
+const live = [
+  { sessionId: 'p1', name: 'pr-reviews-1f', cwd: '/u/pr-reviews', status: 'idle', kind: 'interactive', updatedAt: 10 },
+  { sessionId: 'p2', name: 'pr-reviews-35', cwd: '/u/pr-reviews', status: 'idle', kind: 'interactive', updatedAt: 50 },
+  { sessionId: 'v3', name: 'sphere-v3-web-9f', cwd: '/u/sphere-v3-web', status: 'busy', kind: 'interactive', updatedAt: 20 },
+  { sessionId: 'hq', name: 'hq', cwd: '/u/social-expert', status: 'busy', kind: 'interactive', updatedAt: 99 },
+]
+
+test('departments parse from the option, folders and what each handles', () => {
+  expect(parseDepartments(DEPTS)).toEqual([
+    { label: 'PR Review', folders: ['pr-reviews'], handles: 'reviewing pull requests' },
+    { label: 'Sphere Dev', folders: ['sphere-web', 'sphere-v3-web'], handles: 'Sphere coding' },
+    { label: 'Social', folders: ['social-expert'], handles: '' },
+  ])
+  expect(parseDepartments('nonsense | =x | A=')).toEqual([])
+})
+
+test('each folder is staffed by its most recently active session, never by HQ itself', () => {
+  const [pr, sphere, social] = parseDepartments(DEPTS)
+  expect(desksOf(pr!, live, 'hq')[0]?.session?.name).toBe('pr-reviews-35')
+  expect(desksOf(pr!, live, 'hq')[0]?.others.map(o => o.name)).toEqual(['pr-reviews-1f'])
+  expect(desksOf(sphere!, live, 'hq').map(d => d.session?.name ?? null)).toEqual([null, 'sphere-v3-web-9f'])
+  expect(desksOf(social!, live, 'hq')[0]?.session).toBe(null)
+  const roster = rosterText(parseDepartments(DEPTS), live, 'hq', 'hq')
+  expect(roster).toContain('- PR Review: reviewing pull requests')
+  expect(roster).toContain('pr-reviews: "pr-reviews-35" (idle); also open there: "pr-reviews-1f"')
+  expect(roster).toContain('sphere-web: not running')
+  expect(deptOfSession(parseDepartments(DEPTS), live, 'sphere-v3-web-9f')).toEqual({ label: 'Sphere Dev', folder: 'sphere-v3-web' })
+})
+
+test('a reply closes the newest open dispatch to that session', () => {
+  const msg = '<cross-session-message from="uds:/tmp/x.sock" from-name="pr-reviews-35" from-mode="prompting">\nPR 504: 2 blockers, 1 minor.\nDetails…\n</cross-session-message>'
+  expect(crossMessageOf(msg)).toEqual({ fromName: 'pr-reviews-35', body: 'PR 504: 2 blockers, 1 minor.' })
+  expect(crossMessageOf('hello')).toBe(null)
+  const list = [
+    { to: 'pr-reviews-35', dept: 'PR Review', folder: 'pr-reviews', task: 'review PR 503', at: 1, status: 'replied' as const },
+    { to: 'pr-reviews-35', dept: 'PR Review', folder: 'pr-reviews', task: 'review PR 504', at: 2, status: 'sent' as const },
+  ]
+  const after = answerDispatch(list, 'pr-reviews-35', 'PR 504: 2 blockers', 9)
+  expect(after[1]).toMatchObject({ status: 'replied', reply: 'PR 504: 2 blockers', endedAt: 9 })
+  expect(after[0]).toEqual(list[0])
+})
+
+test('HQ: a SendMessage to a department is tracked, its reply closes it, and the desks show both', { options: { departments: DEPTS } }, async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  mock.env(on, { HOME: '/h' })
+  on('ui.status', () => ({ value: undefined }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('session.id', () => ({ value: 'hq' }))
+  on('fs.list', () => ({ value: live.map((_, i) => ({ name: `${i}.json`, kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false })) }))
+  on('fs.read', (_$, e) => ({ value: JSON.stringify(live[Number(/(\d+)\.json$/.exec((e as { path: string }).path)?.[1] ?? -1)] ?? {}) }))
+  on('tool.call', () => ({ result: {}, text: 'sent' }))
+  await $.turn.start({ text: 'review PR 504', turnId: 'H1' })
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.tool.call({ tool: 'SendMessage', to: 'pr-reviews-35', message: 'Task from HQ: review PR 504\nhttps://github.com/x/y/pull/504' } as never)
+  const ui = await $.ui.mount({ ...pane, surface: 'terminal' })
+  expect(await ui.find({ text: /☻ Claude · HQ supervisor/ })).toBeDefined()
+  expect(await ui.find({ text: /^PR Review$/ })).toBeDefined()
+  expect(await ui.find({ text: /→ review PR 504/ })).toBeDefined()
+  expect(await ui.find({ text: /→ PR Review \(pr-reviews-35\): review PR 504/ })).toBeDefined()
+  await $.turn.start({ text: '<cross-session-message from="uds:/x" from-name="pr-reviews-35">\nPR 504: 2 blockers\n</cross-session-message>', turnId: 'H2' })
+  expect(await ui.find({ text: /✓ PR 504: 2 blockers/ })).toBeDefined()
+  await ui.unmount()
+})
