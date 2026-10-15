@@ -148,7 +148,10 @@ async function refreshStatus($: EngineInterface, cfg: Config) {
     u.pct !== null ? `ctx ${Math.round(u.pct)}%` : null,
     cards.length > 0 ? `agents ${running}/${cards.length}` : null,
     a.consults.length > 0 || a.ids.length > 0 ? `${cfg.architectLabel.toLowerCase()} ${isAdvising(a) ? 'advising' : a.consults.length}` : null,
-    cfg.costBudgetUsd > 0 && u.costUsd !== null ? `budget ${Math.round((u.costUsd / cfg.costBudgetUsd) * 100)}%` : null,
+    // The budget only once it is worth a glance: from the first alert level on.
+    cfg.costBudgetUsd > 0 && u.costUsd !== null && (u.costUsd / cfg.costBudgetUsd) * 100 >= (cfg.costWarnPct[0] ?? 50)
+      ? `budget ${Math.round((u.costUsd / cfg.costBudgetUsd) * 100)}%`
+      : null,
     s.deny > 0 ? `denied ${s.deny}` : null,
   ]
   // Only fields with something to say; with none, no status entry at all.

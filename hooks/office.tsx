@@ -34,6 +34,7 @@ const STEP_MS = 110
 const WALK_FRAMES = 14
 const PER_ROOM = 3
 const COLS = 4
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
 
 const Office: ClientModule<Props, State> = (props, surface) => {
   const { Box, Text } = surface.elements
@@ -68,7 +69,8 @@ const Office: ClientModule<Props, State> = (props, surface) => {
   const colorOf = (p: Person) =>
     p.mood === 'waiting' ? C.waiting : p.mood === 'oops' ? C.oops : p.mood === 'done' ? C.done : p.isBoss ? C.boss : C.staff
   const glyphOf = (p: Person) => (p.isBoss ? '☻' : '☺')
-  const dots = ['.  ', '.. ', '...'][Math.floor(ref.phase / 3) % 3] ?? '...'
+  // One cell, so it survives the narrowest room: a braille spinner while someone works.
+  const spin = SPINNER[Math.floor(ref.phase / 3) % SPINNER.length] ?? '⠿'
   const suffixOf = (p: Person) =>
     p.mood === 'waiting'
       ? ' ?'
@@ -80,7 +82,7 @@ const Office: ClientModule<Props, State> = (props, surface) => {
             ? Math.floor(ref.phase / 9) % 2 === 0 ? ' z' : ' Z'
             : p.zone === 'desk' || !ref.motion
               ? ''
-              : ` ${dots}`
+              : ` ${spin}`
 
   const seated = (z: Zone) => props.people.filter(p => p.zone === z && !isWalking(p.id))
 

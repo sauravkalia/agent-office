@@ -1,6 +1,6 @@
 // The daily usage log, as pure data: one entry per session, filed under the day it started (so a
 // session that runs past midnight is counted once), and the tables `/office usage` prints.
-import { fmtUsd, prettyModel } from './core'
+import { fmtUsd, plural, prettyModel } from './core'
 
 export type SessionUsage = {
   cwd: string
@@ -83,7 +83,7 @@ export const usageReport = (span: 'today' | 'week', days: readonly { day: string
       '| Project | Model | Turns | Agents | Cost |',
       '|---|---|---:|---:|---:|',
       ...rows.map(r => `| ${project(r.cwd)} | ${prettyModel(r.model)} | ${r.turns} | ${r.agents} | ${r.costUsd === null ? '—' : fmtUsd(r.costUsd)} |`),
-      `| **Total** | ${t.sessions} sessions | ${t.turns} | ${t.agents} | **${fmtUsd(t.costUsd)}** |`,
+      `| **Total** | ${plural(t.sessions, 'session')} | ${t.turns} | ${t.agents} | **${fmtUsd(t.costUsd)}** |`,
     ].join('\n')
   }
   const totals = days.map(d => totalOf(d.day, d.log))
