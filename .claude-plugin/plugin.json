@@ -1,13 +1,13 @@
 {
-  "name": "flightdeck",
-  "version": "0.4.0",
-  "description": "Flightdeck: a live agent dashboard for Claude Code. Main model vitals, an on-call architect, every permission check, subagent cards and swimlanes, a turn receipt and a session log, all from real session events",
+  "name": "agent-office",
+  "version": "0.5.0",
+  "description": "Agent Office: your session's agents as office staff who walk to the warehouse, archives or workshop as they work, plus a live dashboard of context, cost, permissions and subagents. Forked from Flightdeck by Stephen Casella",
   "author": {
-    "name": "Stephen Casella",
-    "url": "https://github.com/scasella"
+    "name": "Saurav Kalia",
+    "url": "https://github.com/sauravkalia"
   },
-  "homepage": "https://github.com/scasella/claude-flightdeck",
-  "repository": "https://github.com/scasella/claude-flightdeck",
+  "homepage": "https://github.com/sauravkalia/agent-office",
+  "repository": "https://github.com/sauravkalia/agent-office",
   "license": "MIT",
   "keywords": [
     "claude-code",
@@ -17,7 +17,8 @@
     "subagents",
     "agents",
     "observability",
-    "tui"
+    "tui",
+    "office"
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -107,5 +108,11 @@
       "type": "boolean",
       "default": true
     }
-  }
+  },
+  "contributors": [
+    {
+      "name": "Stephen Casella",
+      "url": "https://github.com/scasella"
+    }
+  ]
 }

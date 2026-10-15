@@ -103,7 +103,7 @@ export type Roster = { architectTypes: string[] }
 
 declare module 'claude-code' {
   interface PluginState {
-    'flightdeck': {
+    'agent-office': {
       meta: { schemaVersion: number }
       main: Main
       usage: Usage

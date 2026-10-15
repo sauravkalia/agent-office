@@ -61,25 +61,25 @@ import {
 } from './core'
 import type { Config, Panel } from './core'
 
-const PANE = 'flightdeck'
-const TITLE = 'Flightdeck'
+const PANE = 'agent-office'
+const TITLE = 'Agent Office'
 const PANE_COLUMNS = 66
 
 
 // ---------------------------------------------------------------- state
 
-const meta = atom({ plugin: 'flightdeck', key: 'meta' } as const, { schemaVersion: SCHEMA_VERSION })
-const main = atom({ plugin: 'flightdeck', key: 'main' } as const, DEFAULT_MAIN)
-const usage = atom({ plugin: 'flightdeck', key: 'usage' } as const, DEFAULT_USAGE)
-const architect = atom({ plugin: 'flightdeck', key: 'architect' } as const, DEFAULT_ARCHITECT)
-const gate = atom({ plugin: 'flightdeck', key: 'gate' } as const, DEFAULT_GATE)
-const agents = atom({ plugin: 'flightdeck', key: 'agents' } as const, [])
-const loops = atom({ plugin: 'flightdeck', key: 'loops' } as const, [])
-const log = atom({ plugin: 'flightdeck', key: 'log' } as const, [])
-const turn = atom({ plugin: 'flightdeck', key: 'turn' } as const, DEFAULT_TURN)
-const receipt = atom({ plugin: 'flightdeck', key: 'receipt' } as const, null)
-const view = atom({ plugin: 'flightdeck', key: 'view' } as const, DEFAULT_VIEW)
-const roster = atom({ plugin: 'flightdeck', key: 'roster' } as const, DEFAULT_ROSTER)
+const meta = atom({ plugin: 'agent-office', key: 'meta' } as const, { schemaVersion: SCHEMA_VERSION })
+const main = atom({ plugin: 'agent-office', key: 'main' } as const, DEFAULT_MAIN)
+const usage = atom({ plugin: 'agent-office', key: 'usage' } as const, DEFAULT_USAGE)
+const architect = atom({ plugin: 'agent-office', key: 'architect' } as const, DEFAULT_ARCHITECT)
+const gate = atom({ plugin: 'agent-office', key: 'gate' } as const, DEFAULT_GATE)
+const agents = atom({ plugin: 'agent-office', key: 'agents' } as const, [])
+const loops = atom({ plugin: 'agent-office', key: 'loops' } as const, [])
+const log = atom({ plugin: 'agent-office', key: 'log' } as const, [])
+const turn = atom({ plugin: 'agent-office', key: 'turn' } as const, DEFAULT_TURN)
+const receipt = atom({ plugin: 'agent-office', key: 'receipt' } as const, null)
+const view = atom({ plugin: 'agent-office', key: 'view' } as const, DEFAULT_VIEW)
+const roster = atom({ plugin: 'agent-office', key: 'roster' } as const, DEFAULT_ROSTER)
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -212,6 +212,30 @@ async function noteMode($: EngineInterface, mode: string | undefined) {
   if (mode) await update($, main, m => (normalize(DEFAULT_MAIN, m).mode === mode ? normalize(DEFAULT_MAIN, m) : { ...normalize(DEFAULT_MAIN, m), mode }))
 }
 
+/** `/office` (and its alias `/flightdeck`): open, close, reset, or set the layout. */
+async function runOffice($: EngineInterface, cfg: Config, args: string) {
+  const [verb = 'open', arg = ''] = args.trim().split(/\s+/)
+  if (verb === 'close') {
+    await $.ui.close({ id: PANE })
+    return { text: 'Agent Office closed.' }
+  }
+  if (verb === 'reset') {
+    await resetAll($)
+    await refreshStatus($, cfg)
+    return { text: 'Agent Office reset.' }
+  }
+  if (verb === 'layout') {
+    const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
+    if (!layout) return { text: 'Usage: /office layout auto|compact|wide|mini' }
+    await update($, view, v => ({ ...normalize(DEFAULT_VIEW, v), layout }))
+    const opened = await openPane($)
+    return { text: opened.isPlaced ? `Agent Office layout: ${layout}.` : `Layout set to ${layout}; the pane is not shown yet: ${opened.reason}` }
+  }
+  const opened = await openPane($)
+  if (!opened.isPlaced) return { text: `Agent Office is not shown yet: ${opened.reason}` }
+  return { text: 'Agent Office opened. Focus it with ctrl+x tab; 1-6 expand cards, f/s/o open the gate rows.' }
+}
+
 // ---------------------------------------------------------------- hooks
 
 export const register: Register = (on, options) => {
@@ -222,8 +246,14 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
+      name: 'office',
+      description: 'Agent Office, the live agent dashboard: open, close, reset, or set the layout',
+      argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
+    })
+    // The upstream name, kept so muscle memory from Flightdeck still works.
+    await $.command.register({
       name: 'flightdeck',
-      description: 'Flightdeck, the live agent dashboard: open, close, reset, or set the layout',
+      description: 'Alias of /office',
       argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
     })
     await migrate($)
@@ -252,28 +282,8 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'flightdeck' }, async ($, e) => {
-    const [verb = 'open', arg = ''] = e.args.trim().split(/\s+/)
-    if (verb === 'close') {
-      await $.ui.close({ id: PANE })
-      return { text: 'Flightdeck closed.' }
-    }
-    if (verb === 'reset') {
-      await resetAll($)
-      await refreshStatus($, cfg)
-      return { text: 'Flightdeck reset.' }
-    }
-    if (verb === 'layout') {
-      const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
-      if (!layout) return { text: 'Usage: /flightdeck layout auto|compact|wide|mini' }
-      await update($, view, v => ({ ...normalize(DEFAULT_VIEW, v), layout }))
-      const opened = await openPane($)
-      return { text: opened.isPlaced ? `Flightdeck layout: ${layout}.` : `Layout set to ${layout}; the pane is not shown yet: ${opened.reason}` }
-    }
-    const opened = await openPane($)
-    if (!opened.isPlaced) return { text: `Flightdeck is not shown yet: ${opened.reason}` }
-    return { text: 'Flightdeck opened. Focus it with ctrl+x tab; 1-6 expand cards, f/s/o open the gate rows.' }
-  })
+  on('command.run', { command: 'office' }, ($, e) => runOffice($, cfg, e.args))
+  on('command.run', { command: 'flightdeck' }, ($, e) => runOffice($, cfg, e.args))
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
     await noteMode($, e.permission_mode)
@@ -1066,7 +1076,7 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
           {cards.length > live.length ? (
-            <Text color={C.faint} wrap="truncate">{`+${cards.length - live.length} more agents · /flightdeck layout compact for all`}</Text>
+            <Text color={C.faint} wrap="truncate">{`+${cards.length - live.length} more agents · /office layout compact for all`}</Text>
           ) : null}
           {lp.length > 0 ? <Text dimColor>{`other loops ${lp.length} · ${lp.filter(l => isLoopActive(l, now)).length} active`}</Text> : null}
           {!m.isRunning && r ? (
@@ -1104,7 +1114,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" width={W}>
         <Box justifyContent="center">
           <Text bold wrap="truncate">
-            <Text>FLIGHTDECK</Text>
+            <Text>AGENT OFFICE</Text>
             <Text color={C.dim}> · </Text>
             <Text color={C.main}>{modelName.toUpperCase()}</Text>
             <Text>{m.isRunning ? ' WORKS' : ' IDLE'}</Text>

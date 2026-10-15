@@ -214,11 +214,11 @@ const engine = (on: On) => {
 }
 
 const pane = (bodyColumns: number) => ({
-  plugin: 'flightdeck',
+  plugin: 'agent-office',
   component: 'Pane' as const,
-  requestId: 'flightdeck',
+  requestId: 'agent-office',
   props: {
-    title: 'Flightdeck',
+    title: 'Agent Office',
     isFocused: true,
     bodyColumns,
     placement: 'dock' as const,

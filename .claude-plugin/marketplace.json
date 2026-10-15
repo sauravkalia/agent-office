@@ -1,17 +1,17 @@
 {
-  "name": "claude-flightdeck",
+  "name": "agent-office",
   "metadata": {
-    "description": "Flightdeck: a live agent dashboard for Claude Code. Main model vitals, an on-call architect, every permission check, subagent cards and swimlanes, a turn receipt and a session log."
+    "description": "Agent Office: a live, animated office of your Claude Code agents, built on Flightdeck."
   },
   "owner": {
-    "name": "Stephen Casella",
-    "url": "https://github.com/scasella"
+    "name": "Saurav Kalia",
+    "url": "https://github.com/sauravkalia"
   },
   "plugins": [
     {
-      "name": "flightdeck",
+      "name": "agent-office",
       "source": "./",
-      "description": "A live pane showing what your session's agents are doing, drawn only from real session events."
+      "description": "Your agents as office staff, plus the Flightdeck dashboard: context, cost, permissions and subagents."
     }
   ]
 }
