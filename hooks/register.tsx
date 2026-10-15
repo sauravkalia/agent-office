@@ -307,7 +307,7 @@ async function supervise($: EngineInterface, cfg: Config, text: string, base: No
       switches: y.switches + (d.isSwitch ? 1 : 0),
     }
   })
-  if (d.isSwitch || d.note.startsWith('kept')) await say($, 'supervisor', `${c.tier} (${c.why}) ${d.note}`, 'consult')
+  if (d.isSwitch || d.note.startsWith('kept')) await say($, 'model', `${c.tier} (${c.why}) ${d.note}`, 'consult')
 }
 
 /**
@@ -1039,7 +1039,7 @@ export const register: Register = (on, options) => {
         </Box>
         {modeOf(rt, cfg) !== 'off' && rt.last ? (
           <Text wrap="truncate">
-            <Text color={C.arch} bold>{'supervisor '}</Text>
+            <Text color={C.arch} bold>{'model '}</Text>
             <Text color={C.dim}>{`${rt.last.tier} (${rt.last.why}) ${rt.last.note}`}</Text>
           </Text>
         ) : null}

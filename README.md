@@ -164,7 +164,7 @@ Each prompt you type is sorted by its words alone (no model call, no tokens):
 | **heavy** | "design", "debug", "refactor", "why does…", "migrate", "review", a stack trace, a long brief, plan mode | `claude-opus-5-5` at `high` effort |
 | *continue* | "yes", "ok go ahead", "do it" | whatever ran last; a go-ahead never drops a task to Haiku |
 
-Every step of the turn then runs on that model; subagents keep their own. The office header shows the call: `supervisor light (quick question) → Haiku 4.5 · saves ~$0.01`.
+Every step of the turn then runs on that model; subagents keep their own. The office header shows the call: `model light (quick question) → Haiku 4.5 · saves ~$0.01`.
 
 **Switching isn't free, and the supervisor knows it.** The prompt cache belongs to one model, and changing effort invalidates it too, so every switch re-sends the whole conversation at the cache-write price. Claude Code's own system prompt and tools are roughly 40k tokens before you type anything, so even an early switch to Opus costs around $0.30 to re-cache. The rules:
 

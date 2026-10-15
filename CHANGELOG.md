@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3
+
+- The per-prompt model routing line now reads **model** (it read "supervisor", which is the HQ boss that hands out work).
+
 ## 0.9.2
 
 - Sphere Dev is one session opened in `~/Documents/GitHub`, covering the web and backend Sphere repos, instead of one session per repo.
