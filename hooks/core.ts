@@ -91,8 +91,8 @@ export const normalizeLog = (stored: unknown): LogLine[] =>
 
 // ---------------------------------------------------------------- config
 
-export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'receipt' | 'log'
-const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'receipt', 'log']
+export type Panel = 'office' | 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'receipt' | 'log'
+const PANELS: readonly Panel[] = ['office', 'main', 'architect', 'gate', 'agents', 'loops', 'receipt', 'log']
 
 export type Config = {
   architect: RegExp

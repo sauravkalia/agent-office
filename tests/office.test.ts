@@ -36,6 +36,7 @@ import {
   startConsult,
   stepSpeed,
 } from '../hooks/core'
+import { namesFor } from '../hooks/office-core'
 import type { Check } from '../types'
 
 // ---------------------------------------------------------------- pure behaviour
@@ -136,7 +137,7 @@ test('consults open, close by id, and draw on a shared timeline', () => {
 
 test('config is read leniently: bad values fall back to defaults', () => {
   const d = parseConfig({})
-  expect([d.maxCards, d.layout, d.motion, d.moments, d.panels.length]).toEqual([3, 'auto', true, true, 7])
+  expect([d.maxCards, d.layout, d.motion, d.moments, d.panels.length]).toEqual([3, 'auto', true, true, 8])
   expect(d.architect.test('fable-advisor:fable-advisor')).toBe(true)
   const c = parseConfig({ architectPattern: '([', maxCards: 99, layout: 'diagonal', panels: 'log, gate ,nope,gate', motion: 'off' })
   expect(c.architect.test('advisor')).toBe(true) // invalid regex → default
@@ -494,4 +495,58 @@ test("the main box shows the last request's time to first token and decode speed
     expect(await ui.find({ text: /ttft 0\.8s · 60 tok\/s/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+// ---------------------------------------------------------------- the office
+
+test('a researching agent walks to the warehouse, then the workshop, and says so', async ($, on) => {
+  engine(on)
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'r1' }))
+  on('tool.call', () => ({ result: {}, text: 'ok' }))
+  await $.turn.start({ text: 'research mods', turnId: 'O1' })
+  await $.agent.spawn(spawn('general-purpose', 'research mods'))
+  await $.tool.call({ tool: 'WebSearch', query: 'claude code mods', agentId: 'r1' } as never)
+  const name = namesFor(['r1']).get('r1') ?? ''
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...pane(80), surface })
+    expect(await ui.find({ text: /office · 2 at work/ })).toBeDefined()
+    expect(await ui.find({ in: 'office', text: /Warehouse/ })).toBeDefined()
+    expect(await ui.find({ in: 'office', text: new RegExp(`aisle|forklift|boxes|cat`) })).toBeDefined()
+    expect(await ui.find({ in: 'office', text: /claude code mods/ })).toBeDefined()
+
+    // The next errand is an edit: they head down the hallway, then settle in the workshop.
+    await $.tool.call({ tool: 'Edit', file_path: '/src/mod.ts', old_string: 'a', new_string: 'b', agentId: 'r1' } as never)
+    expect(await ui.find({ in: 'office', text: /heading to the Workshop/ })).toBeDefined()
+    await ui.advance(2000)
+    expect(await ui.find({ in: 'office', text: /heading to the Workshop/ })).toBeUndefined()
+    expect(await ui.find({ in: 'office', text: new RegExp(`${name}: .*mod\\.ts`) })).toBeDefined()
+    await ui.unmount()
+    await $.tool.call({ tool: 'WebSearch', query: 'claude code mods', agentId: 'r1' } as never)
+  }
+})
+
+test('a pending permission sends the worker to HR and the header asks for you', async ($, on) => {
+  engine(on)
+  on('tool.check', () => ({ decision: 'ask' }))
+  // The call is still waiting on you: its errand started, its check came back "ask".
+  on('tool.call', async (_$, e) => {
+    await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf build' }, tool_use_id: (e as { tool_use_id: string }).tool_use_id })
+    const ui = await $.ui.mount({ ...pane(80), surface: 'terminal' })
+    expect(await ui.find({ text: /someone needs your signature/ })).toBeDefined()
+    expect(await ui.find({ in: 'office', text: /Claude: .*rm -rf build/ })).toBeDefined()
+    await ui.unmount()
+    return { result: {}, text: 'ok' }
+  })
+  await $.turn.start({ text: 'clean up', turnId: 'O2' })
+  await $.tool.call({ tool: 'Bash', command: 'rm -rf build' } as never)
+})
+
+test('above the prompt, the office is one line', async ($, on) => {
+  engine(on)
+  on('tool.call', () => ({ result: {}, text: 'ok' }))
+  await $.turn.start({ text: 'go', turnId: 'O3' })
+  await $.tool.call({ tool: 'Read', file_path: '/a/b.ts' } as never)
+  const ui = await $.ui.mount({ ...pane(80), props: { ...pane(80).props, placement: 'inline' as const }, surface: 'terminal' })
+  expect(await ui.find({ text: /Claude ▸ Archives/ })).toBeDefined()
+  await ui.unmount()
 })

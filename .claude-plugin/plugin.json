@@ -42,9 +42,9 @@
     },
     "panels": {
       "title": "Panels",
-      "description": "Comma-separated panels in display order: main, architect, gate, agents, loops, receipt, log. Leave one out to hide it.",
+      "description": "Comma-separated panels in display order: office, main, architect, gate, agents, loops, receipt, log. Leave one out to hide it.",
       "type": "string",
-      "default": "main,architect,gate,agents,loops,receipt,log"
+      "default": "office,main,architect,gate,agents,loops,receipt,log"
     },
     "motion": {
       "title": "Motion",

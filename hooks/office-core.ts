@@ -202,6 +202,14 @@ export const officeScene = (s: SceneInput): Person[] => {
   return people
 }
 
+/** Rows the office drawing takes: two rows of rooms (tallest room each), the hallway, the chatter. */
+export const officeRows = (people: readonly Person[]) => {
+  const tallest = (zones: readonly Zone[]) => Math.min(4, Math.max(1, ...zones.map(z => people.filter(p => p.zone === z).length)))
+  const top = ROOMS.slice(0, 4).map(r => r.zone)
+  const bottom = ROOMS.slice(4).map(r => r.zone)
+  return 3 + tallest(top) + 1 + 3 + tallest(bottom) + Math.min(5, people.length)
+}
+
 /** The office on one line, for the summary above the prompt: `Claude ▸ Workshop · Priya ▸ Warehouse`. */
 export const officeLine = (people: readonly Person[], width: number) =>
   shorten(people.map(p => `${p.name} ▸ ${roomLabel(p.zone)}${p.mood === 'waiting' ? ' (needs you)' : ''}`).join(' · '), width)

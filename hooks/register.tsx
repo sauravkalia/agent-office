@@ -60,7 +60,7 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
-import { finishErrand, normalizeErrands, startErrand } from './office-core'
+import { ROOMS, finishErrand, normalizeErrands, officeLine, officeRows, officeScene, roomLabel, startErrand } from './office-core'
 
 const PANE = 'agent-office'
 const TITLE = 'Agent Office'
@@ -562,7 +562,7 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const hasClient = 'Client' in els
-    const [m, u, a, g, cards, lp, lines, t, r, v, now] = await Promise.all([
+    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs] = await Promise.all([
       getMain($),
       getUsage($),
       getArchitect($),
@@ -574,6 +574,7 @@ export const register: Register = (on, options) => {
       read($, receipt),
       getView($),
       $.clock.now(),
+      read($, errands).then(normalizeErrands),
     ])
     const W = Math.max(40, e.props.bodyColumns)
     const layout = v.layout ?? cfg.layout
@@ -586,7 +587,9 @@ export const register: Register = (on, options) => {
     const showArchitect = a.consults.length > 0 || a.ids.length > 0
     const motion = cfg.motion && hasClient
     // A panel with nothing to show yet takes no room: most sessions never spawn an agent.
+    const people = officeScene({ cards, errands: errs, gate: g, isRunning: m.isRunning, isAdvising: advising, architectLabel: cfg.architectLabel })
     const isEmpty: Record<Panel, boolean> = {
+      office: false,
       main: false,
       architect: !showArchitect,
       gate: g.recent.length === 0 && gateSummary(g).total === 0,
@@ -621,6 +624,39 @@ export const register: Register = (on, options) => {
       ) : (
         <Text color={color}>{fmtTimer((endAt ?? now) - since)}</Text>
       )
+
+    // ---- office: the main loop as the manager, subagents as staff, each in the room of their errand
+    const atWork = people.filter(p => p.mood === 'ok' || p.mood === 'waiting').length
+    const officePanel = (w: number) => (
+      <Box flexDirection="column" width={w}>
+        <Box justifyContent="space-between" width={w}>
+          <Text bold>{`office · ${atWork} at work`}</Text>
+          {people.some(p => p.mood === 'waiting') ? <Text color={C.amber}>someone needs your signature</Text> : null}
+        </Box>
+        {hasClient ? (
+          <els.Client
+            key="office"
+            module="./office.tsx"
+            width={w}
+            height={officeRows(people)}
+            props={{
+              width: w,
+              motion: cfg.motion,
+              rooms: [...ROOMS],
+              people,
+              colors: { wall: C.faint, label: C.dim, boss: C.main, staff: C.agent, waiting: C.amber, oops: C.warn, done: C.gate, floor: C.faint, text: C.text, dim: C.dim },
+            }}
+          />
+        ) : (
+          people.map(p => (
+            <Text wrap="truncate">
+              <Text color={p.isBoss ? C.main : C.agent} bold>{`${p.isBoss ? '☻' : '☺'} ${p.name} ▸ ${roomLabel(p.zone)}  `}</Text>
+              <Text color={C.dim}>{p.quip}</Text>
+            </Text>
+          ))
+        )}
+      </Box>
+    )
 
     // ---- main
     const effortN = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }[m.effort] ?? 0
@@ -949,7 +985,7 @@ export const register: Register = (on, options) => {
 
     // ---- log: whatever rows the other panels leave, 4 to 8
     // The main box's speed line and the gap above the log are a row each.
-    const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+    const used = (panels.includes('office') ? 1 + officeRows(people) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
     const nLog = logRows(bodyRows, used)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
@@ -978,7 +1014,9 @@ export const register: Register = (on, options) => {
     )
 
     const draw = (p: Panel, w: number) =>
-      p === 'main'
+      p === 'office'
+        ? officePanel(w)
+        : p === 'main'
         ? mainPanel(w)
         : p === 'architect'
           ? architectPanel(w)
@@ -998,7 +1036,7 @@ export const register: Register = (on, options) => {
         {ps.map((p, i) => {
           const prev = ps[i - 1]
           const link =
-            i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
+            i === 0 || p === 'office' || prev === 'office' || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
               ? null
               : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
           return (
@@ -1046,7 +1084,9 @@ export const register: Register = (on, options) => {
     // Inline above the prompt (the terminal's main screen), the pane is a summary of at most 8 rows.
     const isMini = layout === 'mini' || (layout === 'auto' && e.props.placement === 'inline')
     if (isMini) {
-      const live = [...cards.filter(c => c.status === 'running'), ...cards.filter(c => c.status !== 'running').reverse()].slice(0, 3)
+      // Eight rows at most: with the office line, the loops line and the last turn all shown, one agent row gives way.
+      const isCrowded = panels.includes('office') && lp.length > 0 && !m.isRunning && r !== null
+      const live = [...cards.filter(c => c.status === 'running'), ...cards.filter(c => c.status !== 'running').reverse()].slice(0, isCrowded ? 2 : 3)
       const counts = ` ${s.rule} allowed · ${s.cleared} ${decider}${s.ask > 0 ? ` · ${s.ask} pending` : ''} · ${s.deny} denied`
       const strip = g.recent.slice(-Math.max(4, W - cfg.gateLabel.length - 1 - counts.length))
       const mg = u.pct !== null ? gauge(u.pct, 6) : null
@@ -1065,6 +1105,11 @@ export const register: Register = (on, options) => {
             {u.costUsd !== null ? <Text dimColor>{` · ${fmtUsd(u.costUsd)}`}</Text> : null}
             {showArchitect ? <Text color={C.arch}>{` · ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`}</Text> : null}
           </Text>
+          {panels.includes('office') ? (
+            <Text color={people.some(p => p.mood === 'waiting') ? C.amber : C.dim} wrap="truncate">
+              {officeLine(people, W)}
+            </Text>
+          ) : null}
           {strip.length > 0 ? (
             <Box>
               <Text dimColor>{`${cfg.gateLabel.toLowerCase()} `}</Text>
@@ -1113,6 +1158,7 @@ export const register: Register = (on, options) => {
 
     const body = isWide ? (
       <Box flexDirection="column">
+        {panels.includes('office') ? officePanel(W) : null}
         <Box columnGap={2}>
           {column(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW)}
           {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW)}
