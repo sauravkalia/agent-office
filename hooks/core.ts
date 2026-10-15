@@ -309,7 +309,16 @@ export const describeInput = (tool: string, input: unknown) => {
   const what =
     typeof i.command === 'string'
       ? i.command
-      : path || (typeof i.pattern === 'string' ? i.pattern : typeof i.url === 'string' ? i.url : typeof i.description === 'string' ? i.description : '')
+      : path ||
+        (typeof i.pattern === 'string'
+          ? i.pattern
+          : typeof i.query === 'string'
+            ? i.query
+            : typeof i.url === 'string'
+              ? i.url
+              : typeof i.description === 'string'
+                ? i.description
+                : '')
   return redact(what ? `${tool} → ${what}` : tool)
 }
 

@@ -101,6 +101,25 @@ export type View = { expanded: string | null; gateOpen: Bucket | null; layout: L
 
 export type Roster = { architectTypes: string[] }
 
+/** The office rooms a worker can be in. */
+export type Zone = 'desk' | 'archives' | 'warehouse' | 'workshop' | 'server' | 'meeting' | 'hr' | 'coffee'
+
+/** A worker's current tool call: set as it starts, kept (done) until the next one replaces it. */
+export type Errand = { tool: string; text: string; toolUseId: string; at: number; isError: boolean; isDone: boolean }
+
+/** Each worker's errand, keyed by agent id; `main` is the main loop. */
+export type Errands = Record<string, Errand>
+
+/** One person in the office drawing. */
+export type Person = {
+  id: string
+  name: string
+  zone: Zone
+  mood: 'ok' | 'idle' | 'waiting' | 'oops' | 'done'
+  isBoss: boolean
+  quip: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'agent-office': {
@@ -116,6 +135,7 @@ declare module 'claude-code' {
       receipt: Receipt | null
       view: View
       roster: Roster
+      errands: Errands
     }
   }
 }
