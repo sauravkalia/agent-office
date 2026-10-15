@@ -845,7 +845,7 @@ export const register: Register = (on, options) => {
     const PER_FLOOR = 4
     const buildingRows = () => {
       const perRow = 3
-      let rows = 2
+      let rows = 3
       for (let i = 0; i < bs.floors.length; i += perRow) {
         rows += 3 + Math.min(PER_FLOOR, Math.max(1, ...bs.floors.slice(i, i + perRow).map(f => f.people.length)))
       }
@@ -862,6 +862,11 @@ export const register: Register = (on, options) => {
             <Text bold wrap="truncate">{`building · ${bld.live.length} running · ${bs.busy} busy · ${bs.gone.length} gone home`}</Text>
             {sceneButton}
           </Box>
+          <Text wrap="truncate">
+            <Text color={C.main}>☻ you  </Text>
+            <Text color={C.agent}>☺ ⠿ busy  </Text>
+            <Text color={C.dim}>☺ z idle (for how long)</Text>
+          </Text>
           {bld.scannedAt === 0 ? <Text color={C.faint}>looking around the building…</Text> : null}
           {bld.problem ? <Text color={C.amber} wrap="truncate">{bld.problem}</Text> : null}
           {rows.map(row => {
