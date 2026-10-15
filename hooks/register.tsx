@@ -60,6 +60,7 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { finishErrand, normalizeErrands, startErrand } from './office-core'
 
 const PANE = 'agent-office'
 const TITLE = 'Agent Office'
@@ -80,6 +81,7 @@ const turn = atom({ plugin: 'agent-office', key: 'turn' } as const, DEFAULT_TURN
 const receipt = atom({ plugin: 'agent-office', key: 'receipt' } as const, null)
 const view = atom({ plugin: 'agent-office', key: 'view' } as const, DEFAULT_VIEW)
 const roster = atom({ plugin: 'agent-office', key: 'roster' } as const, DEFAULT_ROSTER)
+const errands = atom({ plugin: 'agent-office', key: 'errands' } as const, {})
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -198,6 +200,7 @@ async function resetAll($: EngineInterface) {
   await update($, turn, () => DEFAULT_TURN)
   await update($, receipt, () => null)
   await update($, view, () => DEFAULT_VIEW)
+  await update($, errands, () => ({}))
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null }))
 }
@@ -406,8 +409,16 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     callLoop.set(e.tool_use_id, e.agentId ?? null)
+    // The office: the worker sets off for this call's room before it runs, and stays there after.
+    const who = e.agentId ?? 'main'
+    const isErrand = String(e.tool) !== 'SubagentHandback'
+    if (isErrand) {
+      const errand = { tool: e.tool, text: shorten(describeInput(e.tool, e), 64), toolUseId: e.tool_use_id, at: await $.clock.now() }
+      await update($, errands, x => startErrand(normalizeErrands(x), who, errand))
+    }
     const ran = await next(e).finally(() => callLoop.delete(e.tool_use_id))
     const didRun = ran.deny === undefined
+    if (isErrand) await update($, errands, x => finishErrand(normalizeErrands(x), who, e.tool_use_id, !didRun || ran.isError === true))
     // Settle this call's pending ask, if it had one; skip the write (and the redraw) otherwise.
     const g0 = await getGate($)
     const isSettled = settleCheck(g0, e.tool_use_id, didRun) !== g0
@@ -518,6 +529,8 @@ export const register: Register = (on, options) => {
       })
       await update($, receipt, () => r)
       await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: false }))
+      // The manager walks back to the desk between turns.
+      await update($, errands, x => Object.fromEntries(Object.entries(normalizeErrands(x)).filter(([k]) => k !== 'main')))
       await refreshStatus($, cfg)
       return done
     }
