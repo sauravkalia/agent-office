@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 (Agent Office, forked from Flightdeck 0.4.0)
+
+- **The office**: the main loop as the manager and each subagent as named staff, in the room of their current tool call (Warehouse for research, Archives for reading, Workshop for edits, Server Room for commands, HR Desk while a permission prompt waits, Break Room when done), walking the hallway as it changes, with a line of chatter each.
+- **Budget alerts**: toasts when session cost passes `costWarnPct` of `costBudgetUsd`, or context passes `contextWarnPct`.
+- **Daily usage log**: per-session turns, agents and cost, filed by day in the plugin store and `~/.claude/agent-office/usage/`; `/office usage [today|week]`.
+- **office palette** (default) and the office panel first.
+- Renamed to `agent-office`; `/office`, with `/flightdeck` kept as an alias. Searches show their query in the log.
+
 ## 0.4.0
 
 - The main box shows the time left until each rate-limit window resets (`5h ▰▱▱▱▱ 19% ↻3h10m`), from the `resetsAt` the session already reports. Below 56 columns the gauges stay as they were. ([#3](https://github.com/scasella/claude-flightdeck/pull/3), thanks @vihrea1337)

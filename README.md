@@ -1,65 +1,64 @@
-# Flightdeck
+# Agent Office
 
-[![Release](https://img.shields.io/github/v/release/scasella/claude-flightdeck)](https://github.com/scasella/claude-flightdeck/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Claude Code 2.1.287+](https://img.shields.io/badge/Claude%20Code-2.1.287%2B%20mod-d97757.svg)](https://claude.com/blog/claude-code-mods)
+**A Claude Code mod that turns your session into an office.** Claude is the manager at the desk; every subagent is a member of staff. Hand out work and they get up and go: research sends them to the **Warehouse**, reading to the **Archives**, edits to the **Workshop**, shell commands to the **Server Room**. When a call needs your permission they queue at the **HR Desk**, and when they finish they take a break. Under the office sits the full [Flightdeck](https://github.com/scasella/claude-flightdeck) dashboard (context, cost, permissions, subagents) plus budget alerts and a daily usage log.
 
-**A Claude Code mod that puts a live agent dashboard in your terminal**: context and cost, an advisor timeline, every permission check, and your subagents as cards or swimlanes. Every number comes from a real session event, and nothing leaves your machine.
+Forked from [Flightdeck](https://github.com/scasella/claude-flightdeck) by Stephen Casella (MIT).
 
-<p align="center">
-  <img src="docs/media/demo.gif" alt="Flightdeck during a live session: five audit subagents fan out as cards, switch to swimlanes and finish, while the permission gate fills with checks" width="520">
-</p>
-
-<p align="center">
-  <a href="#install">Install</a> · <a href="#what-you-see">What you see</a> · <a href="#what-it-can-reach">What it can reach</a> · <a href="#configure">Configure</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="CHANGELOG.md">What's new</a>
-</p>
+```
+office · 2 at work                    someone needs your signature
+╭─────────────╮ ╭─────────────╮ ╭─────────────╮ ╭─────────────╮
+│ Open Plan   │ │ Archives    │ │ Warehouse   │ │ Workshop    │
+│             │ │ ☻ Claude ⠹  │ │             │ │             │
+╰─────────────╯ ╰─────────────╯ ╰─────────────╯ ╰─────────────╯
+· · · · · · · · · · · · · · ›☺O · · · · · · · · · · · · · · · ·
+╭─────────────╮ ╭─────────────╮ ╭─────────────╮ ╭─────────────╮
+│ Server Rm   │ │ Meeting Rm  │ │ HR Desk     │ │ Break Room  │
+│             │ │             │ │ ☺ Olu ?     │ │             │
+╰─────────────╯ ╰─────────────╯ ╰─────────────╯ ╰─────────────╯
+Olu: pacing outside HR about claude code mods
+Claude: squinting at sandbox/notes.txt
+```
 
 ## Install
 
 Inside Claude Code (2.1.287 or later):
 
 ```
-/plugin marketplace add scasella/claude-flightdeck
-/plugin install flightdeck@claude-flightdeck
+/plugin marketplace add sauravkalia/agent-office
+/plugin install agent-office@agent-office
 /reload-plugins
-/flightdeck
-```
-
-<details>
-<summary><strong>From the terminal, or from a clone</strong></summary>
-
-```sh
-claude plugin marketplace add scasella/claude-flightdeck
-claude plugin install flightdeck@claude-flightdeck
+/office
 ```
 
 Or load it straight from a clone, for one session:
 
 ```sh
-git clone https://github.com/scasella/claude-flightdeck
-claude --plugin-dir ./claude-flightdeck
+git clone https://github.com/sauravkalia/agent-office
+claude --plugin-dir ./agent-office
 ```
-
-</details>
-
-The installer may say config options aren't set; the defaults are fine, and [`/config`](#configure) changes them.
 
 Mods are an early-access Claude Code feature and their API can change between releases. If something breaks, see [Troubleshooting](#troubleshooting).
 
-## What you see
+## The office
 
-https://github.com/user-attachments/assets/9ad0fcc3-c81c-427a-a743-f7b6c49f5885
+| Room | Who's there | Sent by |
+| --- | --- | --- |
+| **Open Plan** | thinking between calls; idle (z) between turns | no tool in flight, `TodoWrite`, anything unlisted |
+| **Archives** | reading and searching the code | `Read`, `Grep`, `Glob`, `LSP`, `Skill`, `ToolSearch` |
+| **Warehouse** | research | `WebSearch`, `WebFetch`, any `mcp__*` tool |
+| **Workshop** | changing files | `Edit`, `Write`, `NotebookEdit` |
+| **Server Rm** | running commands | `Bash`, `PowerShell`, `Monitor` |
+| **Meeting Rm** | briefing subagents; the architect while advising | `Agent`, `SendMessage`, `Workflow` |
+| **HR Desk** (?) | waiting for your signature: a permission prompt is open | a pending `ask` from `tool.check`; `AskUserQuestion` |
+| **Break Room** | finished (✓) or failed/stopped (!) | the subagent's `turn.complete` |
 
-<p align="center">
-  <img src="docs/media/docked-session.png" alt="Claude Code in fullscreen with the Flightdeck pane docked beside the transcript" width="820">
-</p>
+Each worker keeps the same name for the session and mutters something about the thing they're working on ("rummaging through aisle 7 for claude code mods", "hammering on src/app.ts"). A failed call is an oops ("blames the intern for…"). The walk is drawn on the surface's own frame clock, so only the office redraws while someone moves. With `motion: off` they teleport. Above the prompt (no fullscreen) the office is one line: `Claude ▸ Workshop · Olu ▸ HR Desk (needs you)`.
 
-| Docked beside the transcript | Inline above the prompt |
-| --- | --- |
-| <img src="docs/media/docked-pane.png" alt="The docked pane: main model vitals, architect timeline, permission gate, five agents as swimlanes, last-turn receipt and session log" width="380"> | <img src="docs/media/inline-mini.png" alt="The inline mini layout: the model, context gauge, session cost and architect consults; the permission gate strip and totals; the last turn's duration, agents, edits, errors and cost" width="420"><br><br>On the main screen, without fullscreen, the pane is a summary of at most 8 rows; up to 3 agents join it when the session has subagents. |
+## Everything else on the pane
 
 | Panel | Shows | From |
 | --- | --- | --- |
+| **office** | the main loop as the manager (☻ Claude) and each subagent as staff (☺ Priya, Bob, …), in the room of their current tool call, walking the hallway when it changes; a line of chatter each | `tool.call`, `tool.check`, `agent.spawn`, `turn.complete` |
 | **main** | model, effort, permission mode, request count; a context gauge with compactions (⟲); cost and the first two rate-limit windows when your plan reports them, with the time to each reset (↻) from 56 columns; the last main-loop request's time to first token and output tokens per second | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()` |
 | **architect** | consults on a timeline, whether one is running, how long the last took; optionally the moment of each consult; the first line of a subagent architect's advice | a spawn of a matching agent type, or a matching server tool in the assistant's rows |
 | **gate** | one cell per permission check: green allowed without asking, blue decided by the auto-mode classifier or you and then run, amber pending, red ✗ denied, dim if made inside a subagent. Totals, and a drill-down per tool family with credentials masked | `tool.check`, settled by the `tool.call` around it |
@@ -68,48 +67,47 @@ https://github.com/user-attachments/assets/9ad0fcc3-c81c-427a-a743-f7b6c49f5885
 | **receipt** | the running turn, or the last one: duration, agents, edits, errors, cost added | `turn.start`, `turn.complete` |
 | **log** | prompts, spawns, completions, consults, edits, errors and denials; filtered to one agent while you view its transcript | all of the above |
 
-Connectors animate only while work flows: a turn is running, an agent is running, or a consult is open. Panels with nothing to show take no room, so a session without subagents shows just the main box and the log.
+Panels with nothing to show take no room, so a session without subagents shows the office, the main box and the log.
+
+## Budget alerts
+
+A toast (and a log line) the first time the session's cost passes 50%, 80% and 100% of `costBudgetUsd` ($5 by default), and when context passes 70% and 90%. A jump past several levels raises only the highest. The status line shows `budget N%` from the first level on.
+
+## Daily usage log
+
+Each finished turn updates that session's entry for the day it started: project, model, turns, subagents and cost. It's kept in the plugin's store for 90 days and mirrored to `~/.claude/agent-office/usage/YYYY-MM-DD.json`.
+
+```
+/office usage          # today, one row per session
+/office usage week     # the last 7 days, one row per day
+```
 
 ## Use
 
 | Command | Does |
 | --- | --- |
-| `/flightdeck` | open the pane |
-| `/flightdeck close` | close it |
-| `/flightdeck reset` | clear agents, checks, consults, log and the turn (cost, rate limits and compactions stay) |
-| `/flightdeck layout auto\|compact\|wide\|mini` | override the layout for this session |
+| `/office` | open the pane (`/flightdeck` still works as an alias) |
+| `/office close` | close it |
+| `/office reset` | clear the office, agents, checks, consults, log and the turn |
+| `/office usage [today\|week]` | the usage log as a table |
+| `/office layout auto\|compact\|wide\|mini` | override the layout for this session |
 
-Focus the pane with `ctrl+x tab`, then:
-
-| Key | Does |
-| --- | --- |
-| `1`, `2`, … | expand an agent card or lane: its full task, last 3 tool calls, start of its answer |
-| `f` `s` `o` | open the gate's file / shell / other drill-down: the last 5 checks and their verdicts |
-
-`/clear` resets the pane along with the conversation.
-
-## Where it runs
-
-- **Fullscreen terminal:** docked beside the transcript; two columns from 110 columns wide.
-- **Main-screen terminal:** inline above the prompt, as the 8-row summary.
-- **Desktop app, VS Code, mobile:** the same panels, plus the agents drawn as an SVG time axis. VS Code and mobile can't animate, so connectors and clocks are static there.
-
-With `openOnStart`, the pane opens by itself when a session starts, in terminals at least 144 columns wide; below that, `/flightdeck` opens it. Colours come from your Claude Code theme, so light, dark and colour-blind themes all read.
+Focus the pane with `ctrl+x tab`, then `1`, `2`, … expand an agent card, and `f` `s` `o` open the gate's file, shell or other drill-down.
 
 ## What it can reach
 
-Flightdeck only watches. Every hook passes its event on unchanged: it never denies, rewrites or delays a tool call, a prompt or a subagent.
+Like Flightdeck, it only watches: every hook passes its event on unchanged, and it never denies, rewrites or delays a tool call, a prompt or a subagent. It makes **no** network requests, runs no processes and calls no model.
 
-| It sees | Through |
+Compared with upstream, Agent Office adds:
+
+| Adds | Why |
 | --- | --- |
-| every tool call's name and input, and whether it failed | `tool.call` |
-| every permission verdict | `tool.check` |
-| subagent spawns, their model requests and token usage, and their final answers | `agent.spawn`, `turn.step`, `turn.complete` |
-| your prompts' first 70 characters, for the log | `turn.start` |
-| context, cost and rate-limit readings | `session.measure`, `$.session.usage()` |
-| advisor tool calls in the assistant's responses (their content is encrypted) | `session.append` |
+| `$.store` get/set/keys/delete | the daily usage log (this plugin's own store) |
+| `$.fs.write` to `~/.claude/agent-office/usage/` only | the JSON mirror of the usage log |
+| `$.env.get("HOME")` | to find that folder |
+| `$.ui.toast` | budget and context alerts |
 
-What it keeps: short summaries (a tool name plus a path or command, with credentials masked) in session state, which ends with the session. It makes **no** network requests, runs no processes, reads and writes no files, stores nothing across sessions, and calls no model. `claude plugin validate .` prints exactly what it hooks and calls.
+`claude plugin validate .` prints exactly what it hooks and calls.
 
 ## What is inferred, not measured
 
@@ -118,55 +116,50 @@ What it keeps: short summaries (a tool name plus a path or command, with credent
 - **Per-agent context is the latest request's whole input** (uncached + cache read + cache write). It is labelled `ctx`, not cost: the API has no per-agent cost.
 - **Other loops** can't tell a workflow agent from a compaction fork; both are model loops no card claims.
 - **A background agent's first step** can arrive before its card exists, so its usage may show one step late.
-- **Request speed.** `ttft` and `tok/s` are timed at Flightdeck's own `turn.step` hook, so they include everything beneath it: other plugins' hooks, the engine, the network and any retry. `tok/s` divides the reported `output_tokens` (thinking included) by the time from the first piece of response to the stop. Measured, not inferred, but not the API's own figures.
+- **Request speed.** `ttft` and `tok/s` are timed at the pane's own `turn.step` hook, so they include everything beneath it: other plugins' hooks, the engine, the network and any retry. `tok/s` divides the reported `output_tokens` (thinking included) by the time from the first piece of response to the stop. Measured, not inferred, but not the API's own figures.
 
 ## Configure
 
-In `/config`, or under `pluginConfigs["flightdeck"].options` in `settings.json`:
+In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json`:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `architectPattern` | `advisor\|architect` | case-insensitive regex for agent types and server tools that count as the architect |
-| `matchDescriptions` | `false` | also match agent descriptions, not just type names |
-| `architectLabel` | `ARCHITECT` | the architect's name in the pane |
-| `gateLabel` | `GATE` | the permission panel's name |
-| `panels` | `main,architect,gate,agents,loops,receipt,log` | which panels show, in order |
-| `layout` | `auto` | `mini`, `compact`, `wide`, or `auto` (mini inline, wide from 110 columns docked) |
-| `maxCards` | `3` | cards side by side before swimlanes (1–6); fewer if the pane is too narrow |
-| `motion` | `while-active` | `off` keeps connectors still |
-| `moments` | `true` | show the inferred consult moments |
-| `palette` | `theme` | `pastel` uses fixed colours tuned for dark terminals |
-| `openOnStart` | `true` | ask to open the pane when a session starts |
-| `statusLine` | `true` | context, running agents, consults and denials in the status line |
+| `palette` | `office` | `office` is warm wood and lamplight for dark terminals; `theme` follows your Claude Code theme (use it on light terminals); `pastel` is Flightdeck's fixed colours |
+| `panels` | `office,main,agents,gate,architect,receipt,loops,log` | which panels show, in order |
+| `costBudgetUsd` | `5` | session budget for alerts; `0` turns cost alerts off |
+| `costWarnPct` | `50,80,100` | budget percentages that raise a toast |
+| `contextWarnPct` | `70,90` | context-fill percentages that raise a toast |
+| `motion` | `while-active` | `off` keeps the office and connectors still |
+| `layout` | `auto` | `mini`, `compact`, `wide`, or `auto` |
+| `maxCards` | `3` | agent cards side by side before swimlanes (1–6) |
+| `openOnStart` | `true` | open the pane when a session starts (terminals ≥ 144 columns) |
+| `statusLine` | `true` | context, agents, consults, denials and budget in the status line |
+| `architectPattern`, `architectLabel`, `matchDescriptions`, `moments`, `gateLabel` | as Flightdeck | see [upstream](https://github.com/scasella/claude-flightdeck#configure) |
 
 ## Troubleshooting
 
-**The pane doesn't appear.**
-- Check `claude --version` is 2.1.287 or later, then run `/reload-plugins` and `/flightdeck`.
-- Below 144 columns, Claude Code won't seat a pane nobody asked for; `/flightdeck` opens it at any width.
-- Look in the transcript for a dim line starting `flightdeck:`. It names the hook that failed or the reason the pane was refused. Please [open an issue](https://github.com/scasella/claude-flightdeck/issues) with it.
+**The pane doesn't appear.** Check `claude --version` is 2.1.287 or later, then `/reload-plugins` and `/office`. Below 144 columns Claude Code won't seat a pane nobody asked for; `/office` opens it at any width. A dim transcript line starting `agent-office:` names the hook that failed.
 
-**Colours look wrong.** Set `palette` to `pastel` in `/config`.
+**Colours look wrong.** On a light terminal set `palette` to `theme`.
 
-**It's too much motion.** Set `motion` to `off`.
-
-**Counters look stale after an update.** Run `/flightdeck reset`.
+**Too much motion.** Set `motion` to `off`.
 
 ## How it works
 
 | File | Holds |
 | --- | --- |
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks, state access, and one function per panel |
-| [`hooks/core.ts`](hooks/core.ts) | every reducer, formatter and layout rule as pure functions, so behaviour is testable directly |
-| [`hooks/rail.tsx`](hooks/rail.tsx), [`hooks/elapsed.tsx`](hooks/elapsed.tsx) | surface modules: animated connectors and live clocks that redraw only themselves, on the surface's own frame clock |
+| [`hooks/office-core.ts`](hooks/office-core.ts) | the office as pure data: tool → room, staff names, quips, the scene |
+| [`hooks/office.tsx`](hooks/office.tsx) | the office drawing, a surface module that animates the hallway on its own frame clock |
+| [`hooks/usage-core.ts`](hooks/usage-core.ts) | the usage log and its report |
+| [`hooks/core.ts`](hooks/core.ts) | Flightdeck's reducers and formatters, plus the alert thresholds |
+| [`hooks/rail.tsx`](hooks/rail.tsx), [`hooks/elapsed.tsx`](hooks/elapsed.tsx) | animated connectors and live clocks |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
-| [`tests/`](tests) | 24 tests: pure behaviour, plus drawings mounted on every surface at 40–120 columns |
-
-State lives in `$.state` atoms. Every read is merged over defaults, so a missing or older field never breaks the pane; an update that changes the state's shape may still reset its counters once. New to mods? Start with [Claude Code mods](https://claude.com/blog/claude-code-mods) and [Getting started with Claude Code mods](https://claude.dev/blog/getting-started-with-claude-code-mods/).
+| [`tests/`](tests) | pure behaviour, plus drawings mounted on each surface |
 
 ## Related projects
 
-Flightdeck works alongside these, and owes ideas to them:
+Agent Office works alongside these, and owes ideas to them:
 
 - [claude-hud](https://github.com/jarrodwatts/claude-hud): context, limits, tools and agents in your status line. Use both: that's the status line, this is the pane.
 - [zoetrope](https://github.com/furkankly/zoetrope): a Claude Code or Codex session as a live flow graph.
@@ -182,8 +175,8 @@ claude plugin test .
 npx -p typescript tsc -p .       # after the first load, which writes .claude-plugin/types/
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+Pull upstream fixes with `git fetch upstream && git merge upstream/main`.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Original work © 2026 Stephen Casella; office, alerts and usage log © 2026 Saurav Kalia.
