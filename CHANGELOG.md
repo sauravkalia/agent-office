@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- **Supervisor**: each prompt you type is classified locally as light, standard or heavy, and the main loop runs on Haiku, your session model or Opus (high effort) to match. Downgrades happen only when the saving beats the cost of re-caching the conversation; upgrades always happen. `/office route` shows or pins it; `routing: off` turns it off. Shown in the office header and the session log.
+
 ## 0.5.0 (Agent Office, forked from Flightdeck 0.4.0)
 
 - **The office**: the main loop as the manager and each subagent as named staff, in the room of their current tool call (Warehouse for research, Archives for reading, Workshop for edits, Server Room for commands, HR Desk while a permission prompt waits, Break Room when done), walking the hallway as it changes, with a line of chatter each.

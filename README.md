@@ -1,6 +1,6 @@
 # Agent Office
 
-**A Claude Code mod that turns your session into an office.** Claude is the manager at the desk; every subagent is a member of staff. Hand out work and they get up and go: research sends them to the **Warehouse**, reading to the **Archives**, edits to the **Workshop**, shell commands to the **Server Room**. When a call needs your permission they queue at the **HR Desk**, and when they finish they take a break. Under the office sits the full [Flightdeck](https://github.com/scasella/claude-flightdeck) dashboard (context, cost, permissions, subagents) plus budget alerts and a daily usage log.
+**A Claude Code mod that turns your session into an office.** Claude is the manager at the desk; every subagent is a member of staff. Hand out work and they get up and go: research sends them to the **Warehouse**, reading to the **Archives**, edits to the **Workshop**, shell commands to the **Server Room**. When a call needs your permission they queue at the **HR Desk**, and when they finish they take a break. A **Supervisor** picks the model for each prompt: Haiku for quick questions, Opus for heavy work, your session model for the rest. Under the office sits the full [Flightdeck](https://github.com/scasella/claude-flightdeck) dashboard (context, cost, permissions, subagents) plus budget alerts and a daily usage log.
 
 Forked from [Flightdeck](https://github.com/scasella/claude-flightdeck) by Stephen Casella (MIT).
 
@@ -69,6 +69,33 @@ Each worker keeps the same name for the session and mutters something about the 
 
 Panels with nothing to show take no room, so a session without subagents shows the office, the main box and the log.
 
+## Supervisor: a model per prompt
+
+Each prompt you type is sorted by its words alone (no model call, no tokens):
+
+| Tier | Sent by | Runs on (default) |
+| --- | --- | --- |
+| **light** | short questions: "what does…", "list…", "show…", "run…", "rename…" | `claude-haiku-4-5` |
+| **standard** | everyday tasks | your session model, untouched |
+| **heavy** | "design", "debug", "refactor", "why does…", "migrate", "review", a stack trace, a long brief, plan mode | `claude-opus-5-5` at `high` effort |
+| *continue* | "yes", "ok go ahead", "do it" | whatever ran last; a go-ahead never drops a task to Haiku |
+
+Every step of the turn then runs on that model; subagents keep their own. The office header shows the call: `supervisor light (quick question) → Haiku 4.5 · saves ~$0.01`.
+
+**Switching isn't free, and the supervisor knows it.** The prompt cache belongs to one model, and changing effort invalidates it too, so every switch re-sends the whole conversation at the cache-write price. Claude Code's own system prompt and tools are roughly 40k tokens before you type anything, so even an early switch to Opus costs around $0.30 to re-cache. The rules:
+
+- **Downgrades** (to Haiku, or to lower effort) happen only when the estimated saving over the turn beats the re-cache. Early in a session, or after the cache has gone cold (an hour idle), that's usually true. Deep into a long session it usually isn't, and the log says why: `kept Opus 5.5: switching re-caches 150k (~$1.20) to save ~$0.05`.
+- **Upgrades** are always taken, because quality comes first, and the re-cache cost is shown.
+- Context that won't fit the target (Haiku has 200K) is never switched to.
+
+```
+/office route                 # what it runs on now, last decision, switches, estimated saving
+/office route light|standard|heavy   # pin a tier for this session
+/office route auto|off        # back to routing / leave the session model alone
+```
+
+Set the defaults in `/config`: `routing` (`auto`/`off`), `lightModel`, `heavyModel`, `lightEffort`, `heavyEffort`. The savings are estimates (about 800 output tokens per step, 3/8/15 steps for light/standard/heavy turns, list prices); `/office usage` shows what was actually spent.
+
 ## Budget alerts
 
 A toast (and a log line) the first time the session's cost passes 50%, 80% and 100% of `costBudgetUsd` ($5 by default), and when context passes 70% and 90%. A jump past several levels raises only the highest. The status line shows `budget N%` from the first level on.
@@ -90,13 +117,14 @@ Each finished turn updates that session's entry for the day it started: project,
 | `/office close` | close it |
 | `/office reset` | clear the office, agents, checks, consults, log and the turn |
 | `/office usage [today\|week]` | the usage log as a table |
+| `/office route [auto\|off\|light\|standard\|heavy]` | show or set the supervisor |
 | `/office layout auto\|compact\|wide\|mini` | override the layout for this session |
 
 Focus the pane with `ctrl+x tab`, then `1`, `2`, … expand an agent card, and `f` `s` `o` open the gate's file, shell or other drill-down.
 
 ## What it can reach
 
-Like Flightdeck, it only watches: every hook passes its event on unchanged, and it never denies, rewrites or delays a tool call, a prompt or a subagent. It makes **no** network requests, runs no processes and calls no model.
+It never denies, rewrites or delays a tool call, a prompt or a subagent, and it makes **no** network requests, runs no processes and calls no model. One thing is not watch-only: with `routing: auto`, the **Supervisor rewrites the model and effort of the main loop's requests** (`turn.step`). Set `routing: off` and it goes back to watching only, like Flightdeck.
 
 Compared with upstream, Agent Office adds:
 
@@ -106,6 +134,7 @@ Compared with upstream, Agent Office adds:
 | `$.fs.write` to `~/.claude/agent-office/usage/` only | the JSON mirror of the usage log |
 | `$.env.get("HOME")` | to find that folder |
 | `$.ui.toast` | budget and context alerts |
+| `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
 `claude plugin validate .` prints exactly what it hooks and calls.
 
@@ -126,6 +155,9 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | --- | --- | --- |
 | `palette` | `office` | `office` is warm wood and lamplight for dark terminals; `theme` follows your Claude Code theme (use it on light terminals); `pastel` is Flightdeck's fixed colours |
 | `panels` | `office,main,agents,gate,architect,receipt,loops,log` | which panels show, in order |
+| `routing` | `auto` | the Supervisor: `auto` routes each prompt, `off` keeps the session model |
+| `lightModel` / `heavyModel` | `claude-haiku-4-5` / `claude-opus-5-5` | models for light and heavy prompts |
+| `lightEffort` / `heavyEffort` | `low` / `high` | effort for light and heavy prompts |
 | `costBudgetUsd` | `5` | session budget for alerts; `0` turns cost alerts off |
 | `costWarnPct` | `50,80,100` | budget percentages that raise a toast |
 | `contextWarnPct` | `70,90` | context-fill percentages that raise a toast |
@@ -152,6 +184,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | [`hooks/office-core.ts`](hooks/office-core.ts) | the office as pure data: tool → room, staff names, quips, the scene |
 | [`hooks/office.tsx`](hooks/office.tsx) | the office drawing, a surface module that animates the hallway on its own frame clock |
 | [`hooks/usage-core.ts`](hooks/usage-core.ts) | the usage log and its report |
+| [`hooks/supervisor-core.ts`](hooks/supervisor-core.ts) | the Supervisor: prompt tiers, prices, and the switch-or-stay decision |
 | [`hooks/core.ts`](hooks/core.ts) | Flightdeck's reducers and formatters, plus the alert thresholds |
 | [`hooks/rail.tsx`](hooks/rail.tsx), [`hooks/elapsed.tsx`](hooks/elapsed.tsx) | animated connectors and live clocks |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
