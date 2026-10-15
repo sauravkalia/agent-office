@@ -36,6 +36,7 @@ import {
   startConsult,
   stepSpeed,
 } from '../hooks/core'
+import { alertText, crossedAlerts, percentList } from '../hooks/core'
 import { namesFor } from '../hooks/office-core'
 import type { Check } from '../types'
 
@@ -548,5 +549,39 @@ test('above the prompt, the office is one line', async ($, on) => {
   await $.tool.call({ tool: 'Read', file_path: '/a/b.ts' } as never)
   const ui = await $.ui.mount({ ...pane(80), props: { ...pane(80).props, placement: 'inline' as const }, surface: 'terminal' })
   expect(await ui.find({ text: /Claude ▸ Archives/ })).toBeDefined()
+  await ui.unmount()
+})
+
+// ---------------------------------------------------------------- alerts
+
+test('the highest threshold crossed raises one alert, and never again', () => {
+  const cfg = { costBudgetUsd: 5, costWarnPct: [50, 80, 100], contextWarnPct: [70, 90] }
+  const a = crossedAlerts([], { costUsd: 4.2, contextPct: 40 }, cfg)
+  expect(a.alerts).toEqual([{ key: 'cost:80', kind: 'cost', pct: 80 }])
+  expect(a.fired).toEqual(['cost:50', 'cost:80'])
+  const b = crossedAlerts(a.fired, { costUsd: 4.5, contextPct: 91 }, cfg)
+  expect(b.alerts).toEqual([{ key: 'context:90', kind: 'context', pct: 90 }])
+  expect(crossedAlerts(b.fired, { costUsd: 4.6, contextPct: 95 }, cfg).alerts).toEqual([])
+  expect(crossedAlerts([], { costUsd: 99, contextPct: null }, { ...cfg, costBudgetUsd: 0 }).alerts).toEqual([])
+  expect(alertText({ key: 'cost:100', kind: 'cost', pct: 100 }, { costUsd: 5.5, budgetUsd: 5 })).toBe('Accounts: over budget, $5.50 of $5.00 spent')
+  expect(percentList('80, 50,x,120,50', [1])).toEqual([50, 80])
+  expect(percentList('', [70, 90])).toEqual([70, 90])
+})
+
+test('crossing the budget toasts once and logs it', { options: { costBudgetUsd: 2 } }, async ($, on) => {
+  engine(on)
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  const measure = (usd: number) => $.session.measure({ context: { window: 200_000, percent: 10 }, cost: { usd } as never, rateLimits: [], changed: ['cost'] })
+  await measure(0.5)
+  await measure(1.7)
+  await measure(1.8)
+  expect(toasts).toEqual(['Accounts: 80% of the $2.00 budget spent ($1.70)'])
+  const ui = await $.ui.mount({ ...pane(80), surface: 'terminal' })
+  expect(await ui.find({ text: /80% of the \$2\.00 budget/ })).toBeDefined()
   await ui.unmount()
 })

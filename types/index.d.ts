@@ -136,6 +136,7 @@ declare module 'claude-code' {
       view: View
       roster: Roster
       errands: Errands
+      alerts: { fired: string[] }
     }
   }
 }

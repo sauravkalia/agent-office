@@ -107,6 +107,24 @@
       "description": "Show context, agents, consults and denials in the status line",
       "type": "boolean",
       "default": true
+    },
+    "costBudgetUsd": {
+      "title": "Session budget (USD)",
+      "description": "Toast when the session's cost passes these percentages of this budget; 0 turns cost alerts off",
+      "type": "number",
+      "default": 5
+    },
+    "costWarnPct": {
+      "title": "Budget alert levels",
+      "description": "Comma-separated percentages of the budget that raise a toast",
+      "type": "string",
+      "default": "50,80,100"
+    },
+    "contextWarnPct": {
+      "title": "Context alert levels",
+      "description": "Comma-separated context-fill percentages that raise a toast",
+      "type": "string",
+      "default": "70,90"
     }
   },
   "contributors": [

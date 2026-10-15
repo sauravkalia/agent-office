@@ -107,6 +107,18 @@ export type Config = {
   palette: Palette
   openOnStart: boolean
   statusLine: boolean
+  /** The session budget in dollars; 0 turns cost alerts off. */
+  costBudgetUsd: number
+  /** Percentages of the budget that raise a toast, ascending. */
+  costWarnPct: number[]
+  /** Context fill percentages that raise a toast, ascending. */
+  contextWarnPct: number[]
+}
+
+/** `"80, 50,x,120"` → `[50, 80]`: whole percentages from 1 to 100, sorted, each once. */
+export const percentList = (s: string, fallback: number[]): number[] => {
+  const out = [...new Set(s.split(',').map(x => Math.round(Number(x.trim()))).filter(n => Number.isFinite(n) && n >= 1 && n <= 100))]
+  return out.length > 0 ? out.sort((a, b) => a - b) : fallback
 }
 
 const safeRegExp = (source: string, fallback: string) => {
@@ -140,6 +152,9 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     palette: str('palette', 'theme') === 'pastel' ? 'pastel' : 'theme',
     openOnStart: bool('openOnStart', true),
     statusLine: bool('statusLine', true),
+    costBudgetUsd: typeof o.costBudgetUsd === 'number' && o.costBudgetUsd >= 0 ? o.costBudgetUsd : 5,
+    costWarnPct: percentList(str('costWarnPct', ''), [50, 80, 100]),
+    contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
   }
 }
 
@@ -467,6 +482,45 @@ export const lanes = (cards: AgentCard[], now: number, width: number) => {
     return { id: c.id, before: Math.min(from, width), bar: Math.min(to, width) - Math.min(from, width), after: width - Math.min(to, width) }
   })
 }
+
+// ---------------------------------------------------------------- alerts
+
+export type Alert = { key: string; kind: 'cost' | 'context'; pct: number }
+
+/**
+ * Thresholds the session has just crossed and not yet been told about: the highest one per kind,
+ * so a jump from 40% to 95% raises one toast, not three. Every crossed key comes back in `fired`.
+ */
+export const crossedAlerts = (
+  fired: readonly string[],
+  now: { costUsd: number | null; contextPct: number | null },
+  cfg: Pick<Config, 'costBudgetUsd' | 'costWarnPct' | 'contextWarnPct'>,
+): { alerts: Alert[]; fired: string[] } => {
+  const costPct = now.costUsd !== null && cfg.costBudgetUsd > 0 ? (now.costUsd / cfg.costBudgetUsd) * 100 : null
+  const alerts: Alert[] = []
+  const all = [...fired]
+  const check = (kind: Alert['kind'], pct: number | null, levels: readonly number[]) => {
+    if (pct === null) return
+    const fresh = levels.filter(l => pct >= l && !all.includes(`${kind}:${l}`))
+    if (fresh.length === 0) return
+    for (const l of fresh) all.push(`${kind}:${l}`)
+    const top = fresh[fresh.length - 1] as number
+    alerts.push({ key: `${kind}:${top}`, kind, pct: top })
+  }
+  check('cost', costPct, cfg.costWarnPct)
+  check('context', now.contextPct, cfg.contextWarnPct)
+  return { alerts, fired: all }
+}
+
+/** What the toast says, in the office's voice. */
+export const alertText = (a: Alert, o: { costUsd: number | null; budgetUsd: number }) =>
+  a.kind === 'cost'
+    ? a.pct >= 100
+      ? `Accounts: over budget, ${fmtUsd(o.costUsd ?? 0)} of ${fmtUsd(o.budgetUsd)} spent`
+      : `Accounts: ${a.pct}% of the ${fmtUsd(o.budgetUsd)} budget spent (${fmtUsd(o.costUsd ?? 0)})`
+    : a.pct >= 90
+      ? `Facilities: the office is ${a.pct}% full, compaction soon`
+      : `Facilities: the office is ${a.pct}% full`
 
 // ---------------------------------------------------------------- layout
 

@@ -45,6 +45,8 @@ import {
   normalizeLog,
   noteTool,
   PALETTES,
+  alertText,
+  crossedAlerts,
   SVG_COLORS,
   parseConfig,
   prettyModel,
@@ -82,6 +84,7 @@ const receipt = atom({ plugin: 'agent-office', key: 'receipt' } as const, null)
 const view = atom({ plugin: 'agent-office', key: 'view' } as const, DEFAULT_VIEW)
 const roster = atom({ plugin: 'agent-office', key: 'roster' } as const, DEFAULT_ROSTER)
 const errands = atom({ plugin: 'agent-office', key: 'errands' } as const, {})
+const alerts = atom({ plugin: 'agent-office', key: 'alerts' } as const, { fired: [] })
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -143,6 +146,7 @@ async function refreshStatus($: EngineInterface, cfg: Config) {
     u.pct !== null ? `ctx ${Math.round(u.pct)}%` : null,
     cards.length > 0 ? `agents ${running}/${cards.length}` : null,
     a.consults.length > 0 || a.ids.length > 0 ? `${cfg.architectLabel.toLowerCase()} ${isAdvising(a) ? 'advising' : a.consults.length}` : null,
+    cfg.costBudgetUsd > 0 && u.costUsd !== null ? `budget ${Math.round((u.costUsd / cfg.costBudgetUsd) * 100)}%` : null,
     s.deny > 0 ? `denied ${s.deny}` : null,
   ]
   // Only fields with something to say; with none, no status entry at all.
@@ -201,6 +205,7 @@ async function resetAll($: EngineInterface) {
   await update($, receipt, () => null)
   await update($, view, () => DEFAULT_VIEW)
   await update($, errands, () => ({}))
+  await update($, alerts, () => ({ fired: [] }))
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null }))
 }
@@ -368,7 +373,19 @@ export const register: Register = (on, options) => {
       costUsd: e.cost?.usd ?? null,
       limits: e.rateLimits.map(limitOf),
     }))
-    if (e.changed.includes('context')) await refreshStatus($, cfg)
+    // Budget and context alerts: one toast per threshold crossed, never repeated this session.
+    const fired = listOf<string>((await read($, alerts))?.fired)
+    const costUsd = e.cost?.usd ?? null
+    const crossed = crossedAlerts(fired, { costUsd, contextPct: e.context.percent ?? null }, cfg)
+    if (crossed.alerts.length > 0) {
+      await update($, alerts, () => ({ fired: crossed.fired }))
+      for (const al of crossed.alerts) {
+        const text = alertText(al, { costUsd, budgetUsd: cfg.costBudgetUsd })
+        $.ui.toast(text, { timeoutMs: 8000 })
+        await say($, al.kind === 'cost' ? 'accounts' : 'facilities', text, 'error')
+      }
+    }
+    if (e.changed.includes('context') || e.changed.includes('cost')) await refreshStatus($, cfg)
     return next(e)
   })
 
