@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- Sphere Dev is one session opened in `~/Documents/GitHub`, covering the web and backend Sphere repos, instead of one session per repo.
+
 ## 0.9.1
 
 - The Quilt-Discussion department is labelled **Quilt Discussion**.

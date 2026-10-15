@@ -1,6 +1,6 @@
 {
   "name": "agent-office",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Agent Office: your session's agents as office staff who walk to the warehouse, archives or workshop as they work, plus a live dashboard of context, cost, permissions and subagents. Forked from Flightdeck by Stephen Casella",
   "author": {
     "name": "Saurav Kalia",
@@ -176,7 +176,7 @@
       "title": "Departments",
       "description": "Long-running sessions the supervisor hands tasks to, as Label=folder,folder: what it handles, separated by |. A folder is a project folder's name.",
       "type": "string",
-      "default": "PR Review=pr-reviews: reviewing pull requests | Sphere Dev=sphere-web,sphere-v3-web,sphere-iconic-web: coding tasks in the Sphere repos (send to the repo the task names) | Quilt Discussion=Quilt-Discussion: Quilt code and design discussion | Social=social-expert: Instagram and YouTube content | Daily Dose=daily-dose: tech questions and what's new in technology"
+      "default": "PR Review=pr-reviews: reviewing pull requests | Sphere Dev=GitHub: coding in the Sphere repos under ~/Documents/GitHub (sphere-web, sphere-v3-web, sphere-iconic-web, sphere-backend, sphere-v3-backend); name the repo in the brief | Quilt Discussion=Quilt-Discussion: Quilt code and design discussion | Social=social-expert: Instagram and YouTube content | Daily Dose=daily-dose: tech questions and what's new in technology"
     }
   },
   "contributors": [

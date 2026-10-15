@@ -113,7 +113,7 @@ Set them in `/config` → agent-office → **Departments**, as `Label=folder,fol
 | Department | Folders | Handles |
 | --- | --- | --- |
 | PR Review | pr-reviews | reviewing pull requests |
-| Sphere Dev | sphere-web, sphere-v3-web, sphere-iconic-web | coding in the Sphere repos (sent to the repo the task names) |
+| Sphere Dev | GitHub (one session in `~/Documents/GitHub`) | coding in sphere-web, sphere-v3-web, sphere-iconic-web, sphere-backend, sphere-v3-backend; the brief names the repo |
 | Quilt Discussion | Quilt-Discussion | Quilt code and design discussion |
 | Social | social-expert | Instagram and YouTube content |
 | Daily Dose | daily-dose | tech questions and what's new |
