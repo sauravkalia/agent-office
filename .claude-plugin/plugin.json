@@ -177,6 +177,16 @@
       "description": "Long-running sessions the supervisor hands tasks to, as Label=folder,folder: what it handles, separated by |. A folder is a project folder's name.",
       "type": "string",
       "default": "PR Review=pr-reviews: reviewing pull requests | Sphere Dev=GitHub: coding in the Sphere repos under ~/Documents/GitHub (sphere-web, sphere-v3-web, sphere-iconic-web, sphere-backend, sphere-v3-backend); name the repo in the brief | Quilt Discussion=Quilt-Discussion: Quilt code and design discussion | Social=social-expert: Instagram and YouTube content | Daily Dose=daily-dose: tech questions and what's new in technology"
+    },
+    "officeStyle": {
+      "title": "Office style",
+      "description": "text: the rooms drawn in characters; pixel: pixel art where the terminal shows inline pictures (kitty, Ghostty, WezTerm) and in the desktop app, text elsewhere. /office pixel switches for the session.",
+      "type": "string",
+      "options": [
+        "text",
+        "pixel"
+      ],
+      "default": "text"
     }
   },
   "contributors": [

@@ -103,6 +103,8 @@ export type View = {
   layout: Layout | null
   /** Which picture the office panel draws: this session's office, or every session in the building. */
   scene?: 'office' | 'building'
+  /** How the office floor is drawn this session: the text rooms, or pixel art; absent, the configured `officeStyle`. */
+  style?: 'text' | 'pixel'
 }
 
 /** A running session, from Claude Code's session registry. */
@@ -191,6 +193,8 @@ declare module 'claude-code' {
       route: Route
       building: Building
       dispatches: Dispatch[]
+      /** Can this terminal show inline pictures: guessed from its environment, then confirmed by drawing one. */
+      pixelEnv: { images: boolean; denied: boolean }
     }
   }
 }

@@ -122,6 +122,8 @@ export type Config = {
   supervisor: SupervisorConfig
   /** Long-running sessions the supervisor delegates to, from the `departments` option. */
   departments: Department[]
+  /** The office floor's default look: the text rooms, or pixel art where the terminal shows pictures. */
+  officeStyle: 'text' | 'pixel'
 }
 
 /** `"80, 50,x,120"` → `[50, 80]`: whole percentages from 1 to 100, sorted, each once. */
@@ -168,6 +170,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     costWarnPct: percentList(str('costWarnPct', ''), [50, 80, 100]),
     contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
     routing: str('routing', 'auto') === 'off' ? 'off' : 'auto',
+    officeStyle: str('officeStyle', 'text') === 'pixel' ? 'pixel' : 'text',
     departments: parseDepartments(typeof o.departments === 'string' ? o.departments : ''),
     supervisor: {
       lightModel: str('lightModel', 'claude-haiku-4-5'),

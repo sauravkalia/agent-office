@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentCard, Architect, Building, Bucket, Dispatch, LiveSession, Check, Gate, Layout, LogLine, Loop, Main, Roster, Route, Turn, Usage, View } from '../types'
+import type { AgentCard, Architect, Building, Bucket, Dispatch, LiveSession, Check, Gate, Layout, LogLine, Loop, Main, Person, Roster, Route, Turn, Usage, View } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -62,6 +62,8 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { base64, drawOffice, encodePng, rowsFor, termShowsImages } from './pixel-core'
+import type { Walk } from './pixel-core'
 import { answerDispatch, crossMessageOf, deptOfSession, desksOf, rosterText } from './departments-core'
 import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
 import { SESSION, applyTarget, classify, decide } from './supervisor-core'
@@ -96,6 +98,7 @@ const route = atom({ plugin: 'agent-office', key: 'route' } as const, DEFAULT_RO
 const DEFAULT_BUILDING: Building = { live: [], past: [], scannedAt: 0, historyMtime: 0, problem: null }
 const building = atom({ plugin: 'agent-office', key: 'building' } as const, DEFAULT_BUILDING)
 const dispatches = atom({ plugin: 'agent-office', key: 'dispatches' } as const, [])
+const pixelEnv = atom({ plugin: 'agent-office', key: 'pixelEnv' } as const, { images: false, denied: false })
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -393,6 +396,23 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
     const opened = await openPane($)
     return { text: opened.isPlaced ? (scene === 'building' ? 'Showing every session on this machine.' : 'Showing this session\'s office.') : `Not shown yet: ${opened.reason}` }
   }
+  if (verb === 'pixel') {
+    const v = normalize(DEFAULT_VIEW, await read($, view))
+    const style: 'text' | 'pixel' = arg === 'off' || arg === 'text' ? 'text' : arg === 'on' ? 'pixel' : (v.style ?? cfg.officeStyle) === 'pixel' ? 'text' : 'pixel'
+    const scene: 'office' | 'building' = 'office'
+    await update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), style, scene }))
+    if (style === 'pixel') await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: false }))
+    const env = await read($, pixelEnv)
+    await openPane($)
+    return {
+      text:
+        style === 'text'
+          ? 'Office back to text.'
+          : env?.images
+            ? 'Pixel office on. /office pixel again (or p in the pane) switches back.'
+            : "Pixel office on, but this terminal doesn't look like it shows pictures (kitty, Ghostty or WezTerm, not under tmux), so the text office stays. The desktop app shows it.",
+    }
+  }
   if (verb === 'route') return { text: await routeText($, cfg, arg) }
   if (verb === 'departments') {
     if (cfg.departments.length === 0) return { text: 'No departments set. Add them in /config → agent-office → Departments.' }
@@ -418,6 +438,25 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
 export const register: Register = (on, options) => {
   const cfg = parseConfig(options)
   const C = PALETTES[cfg.palette]
+  // The pixel office's motion lives here, not in state: where each person was, and who's walking.
+  const WALK_MS = 1500
+  const seenZone = new Map<string, Person['zone']>()
+  const walking = new Map<string, { from: Person['zone']; to: Person['zone']; start: number }>()
+  let shown: { people: Person[]; columns: number; rows: number } | null = null
+  const pixelFrame = (people: Person[], now: number) => {
+    for (const p of people) {
+      const was = seenZone.get(p.id)
+      if (was !== undefined && was !== p.zone) walking.set(p.id, { from: was, to: p.zone, start: now })
+      seenZone.set(p.id, p.zone)
+    }
+    const walks = new Map<string, Walk>()
+    for (const [id, w] of walking) {
+      const t = (now - w.start) / WALK_MS
+      if (t >= 1) walking.delete(id)
+      else walks.set(id, { from: w.from, to: w.to, t })
+    }
+    return base64(encodePng(drawOffice(people, walks, Math.floor(now / 400))))
+  }
   // tool.check carries no loop id; the tool.call around it does, keyed by the call's id.
   const callLoop = new Map<string, string | null>()
 
@@ -425,7 +464,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'office',
       description: 'Agent Office, the live agent dashboard: open, close, reset, or set the layout',
-      argumentHint: '[open|close|reset|building|office|departments|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
+      argumentHint: '[open|close|reset|building|office|pixel [on|off]|departments|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
     })
     // The upstream name, kept so muscle memory from Flightdeck still works.
     await $.command.register({
@@ -434,6 +473,28 @@ export const register: Register = (on, options) => {
       argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
     })
     await migrate($)
+    // Pixel office: does this terminal show inline pictures? A guess from its environment; drawing one confirms it.
+    const [TERM, TERM_PROGRAM, TMUX, KITTY_WINDOW_ID, GHOSTTY_RESOURCES_DIR, WEZTERM_EXECUTABLE] = await Promise.all([
+      $.env.get('TERM'),
+      $.env.get('TERM_PROGRAM'),
+      $.env.get('TMUX'),
+      $.env.get('KITTY_WINDOW_ID'),
+      $.env.get('GHOSTTY_RESOURCES_DIR'),
+      $.env.get('WEZTERM_EXECUTABLE'),
+    ])
+    const images = termShowsImages({ TERM, TERM_PROGRAM, TMUX, KITTY_WINDOW_ID, GHOSTTY_RESOURCES_DIR, WEZTERM_EXECUTABLE })
+    await update($, pixelEnv, x => ({ images, denied: x?.denied ?? false }))
+    // While the pixel office is up and something moves, swap in a fresh frame about four times a second.
+    $.clock.every(250, async () => {
+      if (!shown || !shown.people.some(p => p.mood === 'ok' || walking.has(p.id))) return
+      const now = await $.clock.now()
+      const r = await $.ui.blit({ requestId: PANE, key: 'office-px', source: { png: pixelFrame(shown.people, now) }, columns: shown.columns, rows: shown.rows })
+      if (r.deny) {
+        shown = null
+        // Drawing its alt: this terminal can't show the picture, so the text office comes back.
+        if (/alt|placeholder|image/i.test(r.deny)) await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: true }))
+      }
+    })
     // Every 5 s: the whole building while it's on screen (history only when it changed); otherwise
     // just the running sessions, when there are departments to staff.
     $.clock.every(5000, async () => {
@@ -813,7 +874,7 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const hasClient = 'Client' in els
-    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt, bld, selfId, sent] = await Promise.all([
+    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt, bld, selfId, sent, pxEnv] = await Promise.all([
       getMain($),
       getUsage($),
       getArchitect($),
@@ -830,6 +891,7 @@ export const register: Register = (on, options) => {
       read($, building).then(b => normalize(DEFAULT_BUILDING, b)),
       $.session.id().catch(() => ''),
       read($, dispatches).then(x => listOf<Dispatch>(x)),
+      read($, pixelEnv),
     ])
     const W = Math.max(40, e.props.bodyColumns)
     const layout = v.layout ?? cfg.layout
@@ -1030,11 +1092,71 @@ export const register: Register = (on, options) => {
       return p.mood === 'waiting' ? C.amber : p.mood === 'oops' ? C.warn : p.mood === 'done' ? C.gate : C.agent
     }
 
+    // ---- pixel floor: the same office as pixel art, an Image in terminals that show pictures, an
+    // SVG on the other surfaces; null keeps the text office (opted out, or no pictures here)
+    const isPixel = (v.style ?? cfg.officeStyle) === 'pixel'
+    const nextStyle: 'text' | 'pixel' = isPixel ? 'text' : 'pixel'
+    const pixelFloor = (w: number) => {
+      if (!isPixel || isBuilding) {
+        shown = null
+        return null
+      }
+      const caption = (
+        <Box flexDirection="column" width={w}>
+          {[...people]
+            .sort((x, y) => (y.mood === 'waiting' ? 1 : 0) - (x.mood === 'waiting' ? 1 : 0))
+            .slice(0, 5)
+            .map(p => (
+              <Text wrap="truncate">
+                <Text color={p.mood === 'waiting' ? C.amber : p.isBoss ? C.main : C.agent} bold>{`${p.name}${p.role && p.role !== 'staff' ? ` (${p.role})` : ''} ▸ ${roomLabel(p.zone)}: `}</Text>
+                <Text color={C.dim}>{p.quip}</Text>
+              </Text>
+            ))}
+        </Box>
+      )
+      if (e.surface === 'terminal') {
+        if (!pxEnv?.images || pxEnv.denied || !('Image' in els)) {
+          shown = null
+          return null
+        }
+        const columns = Math.min(255, w)
+        const rows = rowsFor(columns)
+        shown = { people, columns, rows }
+        const { Image } = els
+        return (
+          <Box flexDirection="column" width={w}>
+            <Image key="office-px" source={{ png: pixelFrame(people, now) }} columns={columns} rows={rows} alt={officeLine(people, w)} />
+            {caption}
+          </Box>
+        )
+      }
+      shown = null
+      if (!('Svg' in els)) return null
+      const { Svg } = els
+      const pxW = 480
+      const pxH = Math.round((pxW * 88) / 160)
+      const png = pixelFrame(people, now)
+      return (
+        <Box flexDirection="column" width={w}>
+          <Svg
+            source={`<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${pxH}" viewBox="0 0 160 88"><image href="data:image/png;base64,${png}" width="160" height="88" style="image-rendering:pixelated"/></svg>`}
+            alt={officeLine(people, 120)}
+            width={pxW}
+            height={pxH}
+          />
+          {caption}
+        </Box>
+      )
+    }
+
     const officePanel = (w: number) => isBuilding ? buildingPanel(w) : (
       <Box flexDirection="column" width={w}>
         <Box justifyContent="space-between" width={w}>
           <Text bold>{`office · ${atWork} at work`}</Text>
-          {sceneButton}
+          <Box columnGap={2}>
+            <Button key="style" plain hotkey="p" label={isPixel ? 'text ▸' : 'pixel ▸'} onPress={() => update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), style: nextStyle }))} />
+            {sceneButton}
+          </Box>
           {people.some(p => p.mood === 'waiting') ? <Text color={C.amber}>someone needs your signature</Text> : null}
         </Box>
         {modeOf(rt, cfg) !== 'off' && rt.last ? (
@@ -1044,7 +1166,7 @@ export const register: Register = (on, options) => {
           </Text>
         ) : null}
         {orgChart(w)}
-        {hasClient ? (
+        {pixelFloor(w) ?? (hasClient ? (
           <els.Client
             key="office"
             module="./office.tsx"
@@ -1065,7 +1187,7 @@ export const register: Register = (on, options) => {
               <Text color={C.dim}>{p.quip}</Text>
             </Text>
           ))
-        )}
+        ))}
       </Box>
     )
 
