@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentCard, Architect, Bucket, Check, Gate, Layout, LogLine, Loop, Main, Roster, Turn, Usage, View } from '../types'
+import type { AgentCard, Architect, Bucket, Check, Gate, Layout, LogLine, Loop, Main, Roster, Route, Turn, Usage, View } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -62,6 +62,8 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { SESSION, applyTarget, classify, decide } from './supervisor-core'
+import type { Tier } from './supervisor-core'
 import { STORE_PREFIX, dayOf, lastDays, normalizeDay, recordTurn, staleKeys, usageReport } from './usage-core'
 import { ROOMS, finishErrand, normalizeErrands, officeLine, officeRows, officeScene, roomLabel, startErrand } from './office-core'
 
@@ -87,6 +89,8 @@ const roster = atom({ plugin: 'agent-office', key: 'roster' } as const, DEFAULT_
 const errands = atom({ plugin: 'agent-office', key: 'errands' } as const, {})
 const alerts = atom({ plugin: 'agent-office', key: 'alerts' } as const, { fired: [] })
 const sessionDay = atom({ plugin: 'agent-office', key: 'sessionDay' } as const, { day: '' })
+const DEFAULT_ROUTE: Route = { override: null, current: SESSION, base: null, lastStepAt: 0, pending: null, last: null, savedUsd: 0, switches: 0 }
+const route = atom({ plugin: 'agent-office', key: 'route' } as const, DEFAULT_ROUTE)
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -118,6 +122,12 @@ async function getTurn($: EngineInterface): Promise<Turn> {
 }
 async function getView($: EngineInterface): Promise<View> {
   return normalize(DEFAULT_VIEW, await read($, view))
+}
+/** The supervisor's mode: what `/office route` set for this session, else the configured `routing`. */
+const modeOf = (r: Route, cfg: Config) => r.override ?? cfg.routing
+async function getRoute($: EngineInterface): Promise<Route> {
+  const r = normalize(DEFAULT_ROUTE, await read($, route))
+  return { ...r, current: normalize(SESSION, r.current) }
 }
 async function getRoster($: EngineInterface): Promise<Roster> {
   const r = normalize(DEFAULT_ROSTER, await read($, roster))
@@ -212,6 +222,7 @@ async function resetAll($: EngineInterface) {
   await update($, errands, () => ({}))
   await update($, alerts, () => ({ fired: [] }))
   await update($, sessionDay, () => ({ day: '' }))
+  await update($, route, r => ({ ...DEFAULT_ROUTE, override: normalize(DEFAULT_ROUTE, r).override, savedUsd: normalize(DEFAULT_ROUTE, r).savedUsd }))
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null }))
 }
@@ -251,6 +262,68 @@ async function pruneUsage($: EngineInterface) {
   for (const k of staleKeys(await $.store.keys(), now)) await $.store.delete(k)
 }
 
+const PROMPT_CACHE_MS = 60 * 60_000
+
+/**
+ * The supervisor at the start of a turn you typed: classify the prompt, then move the main loop to
+ * that tier's model and effort if the move pays for its re-cache (always, for an upgrade or a pin).
+ */
+async function supervise($: EngineInterface, cfg: Config, text: string, base: NonNullable<Route['base']>, now: number) {
+  const r = await getRoute($)
+  const mode = modeOf(r, cfg)
+  if (mode === 'off') {
+    if (r.current.model || r.current.effort) await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), current: SESSION }))
+    return
+  }
+  const [m, u] = await Promise.all([getMain($), getUsage($)])
+  const isPinned = mode !== 'auto'
+  const c = isPinned ? { tier: mode as Tier, why: 'pinned' } : classify(text, { isPlanMode: m.mode === 'plan' })
+  if (c.tier === 'continue') {
+    await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), last: { tier: 'continue', why: c.why, note: 'carries on as before', isSwitch: false } }))
+    return
+  }
+  const d = decide({
+    tier: c.tier,
+    current: r.current,
+    base,
+    ctxTokens: u.tokens ?? 0,
+    isCacheWarm: r.lastStepAt > 0 && now - r.lastStepAt < PROMPT_CACHE_MS,
+    isPinned,
+    cfg: cfg.supervisor,
+  })
+  await update($, route, x => {
+    const y = normalize(DEFAULT_ROUTE, x)
+    return {
+      ...y,
+      current: d.next,
+      last: { tier: c.tier, why: c.why, note: d.note, isSwitch: d.isSwitch },
+      savedUsd: y.savedUsd + d.savingUsd,
+      switches: y.switches + (d.isSwitch ? 1 : 0),
+    }
+  })
+  if (d.isSwitch || d.note.startsWith('kept')) await say($, 'supervisor', `${c.tier} (${c.why}) ${d.note}`, 'consult')
+}
+
+/** `/office route [auto|off|light|standard|heavy]`: show or set the supervisor. */
+async function routeText($: EngineInterface, cfg: Config, arg: string) {
+  const modes = ['auto', 'off', 'light', 'standard', 'heavy'] as const
+  const mode = modes.find(x => x === arg)
+  if (arg && !mode) return 'Usage: /office route [auto|off|light|standard|heavy]'
+  if (mode) await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), override: mode, ...(mode === 'off' ? { current: SESSION } : {}) }))
+  const r = await getRoute($)
+  const now = r.base ? `${prettyModel(r.current.model ?? r.base.model)} (${r.current.effort ?? r.base.effort ?? 'default'} effort)` : 'the session model (no request yet)'
+  return [
+    `**Supervisor: ${modeOf(r, cfg)}**${mode ? ' (set for this session)' : ''}`,
+    '',
+    `| | |`,
+    `|---|---|`,
+    `| Main loop runs on | ${now} |`,
+    `| Last decision | ${r.last ? `${r.last.tier} (${r.last.why}): ${r.last.note}` : '—'} |`,
+    `| Switches this session | ${r.switches} |`,
+    `| Estimated saving | ${fmtUsd(r.savedUsd)} |`,
+  ].join('\n')
+}
+
 /** `/office usage [today|week]`: the log as a table. */
 async function usageText($: EngineInterface, arg: string) {
   const span = arg === 'week' ? 'week' : 'today'
@@ -271,6 +344,7 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
     await refreshStatus($, cfg)
     return { text: 'Agent Office reset.' }
   }
+  if (verb === 'route') return { text: await routeText($, cfg, arg) }
   if (verb === 'usage') return { text: await usageText($, arg).catch(() => 'The usage log is not readable in this session.') }
   if (verb === 'layout') {
     const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
@@ -296,7 +370,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'office',
       description: 'Agent Office, the live agent dashboard: open, close, reset, or set the layout',
-      argumentHint: '[open|close|reset|usage today|week|layout auto|compact|wide|mini]',
+      argumentHint: '[open|close|reset|route auto|off|light|standard|heavy|usage today|week|layout auto|compact|wide|mini]',
     })
     // The upstream name, kept so muscle memory from Flightdeck still works.
     await $.command.register({
@@ -364,6 +438,8 @@ export const register: Register = (on, options) => {
     } else if (e.text) {
       const p = promptLine(e.text)
       await say($, p.who, p.text)
+      // Only what you typed is routed; the engine's own turns carry on as they were.
+      await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), pending: p.who === 'you' ? e.text ?? null : null }))
     }
     return next(e)
   })
@@ -371,16 +447,28 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     // The main loop's model is known when its request starts; a long first request shouldn't read "—".
     if (!e.agentId) {
-      await update($, main, m => {
-        const x = normalize(DEFAULT_MAIN, m)
-        return { ...x, model: e.model, effort: String(e.effort ?? x.effort), steps: x.steps + 1 }
-      })
       // Time the response as it passes: the first piece that is not the engine's envelope, then the
       // stop chunk. Two clock reads in the stream and nothing stored until it has ended.
       const sentAt = await $.clock.now()
       let firstAt: number | null = null
       let stopAt: number | null = null
-      const s = next(e)
+      // The supervisor: decide on the prompt you typed at the turn's first request (the session's own
+      // model and effort are known here), then send every step of the turn on the chosen ones.
+      const base = { model: e.model, effort: typeof e.effort === 'string' ? e.effort : null }
+      const pending = (await getRoute($)).pending
+      if (pending !== null) {
+        await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), pending: null }))
+        await supervise($, cfg, pending, base, sentAt)
+      }
+      await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), base, lastStepAt: sentAt }))
+      const r = await getRoute($)
+      const routed = modeOf(r, cfg) === 'off' ? e : { ...e, ...applyTarget(r.current, e) }
+      // The main box shows what the step actually runs on.
+      await update($, main, m => {
+        const x = normalize(DEFAULT_MAIN, m)
+        return { ...x, model: routed.model, effort: String(routed.effort ?? x.effort), steps: x.steps + 1 }
+      })
+      const s = next(routed)
       for await (const c of s) {
         if (c.kind === 'stop') stopAt = await $.clock.now()
         else if (firstAt === null && c.kind !== 'engine') firstAt = await $.clock.now()
@@ -621,7 +709,7 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const hasClient = 'Client' in els
-    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs] = await Promise.all([
+    const [m, u, a, g, cards, lp, lines, t, r, v, now, errs, rt] = await Promise.all([
       getMain($),
       getUsage($),
       getArchitect($),
@@ -634,6 +722,7 @@ export const register: Register = (on, options) => {
       getView($),
       $.clock.now(),
       read($, errands).then(normalizeErrands),
+      getRoute($),
     ])
     const W = Math.max(40, e.props.bodyColumns)
     const layout = v.layout ?? cfg.layout
@@ -692,6 +781,12 @@ export const register: Register = (on, options) => {
           <Text bold>{`office · ${atWork} at work`}</Text>
           {people.some(p => p.mood === 'waiting') ? <Text color={C.amber}>someone needs your signature</Text> : null}
         </Box>
+        {modeOf(rt, cfg) !== 'off' && rt.last ? (
+          <Text wrap="truncate">
+            <Text color={C.arch} bold>{'supervisor '}</Text>
+            <Text color={C.dim}>{`${rt.last.tier} (${rt.last.why}) ${rt.last.note}`}</Text>
+          </Text>
+        ) : null}
         {hasClient ? (
           <els.Client
             key="office"
@@ -1044,7 +1139,7 @@ export const register: Register = (on, options) => {
 
     // ---- log: whatever rows the other panels leave, 4 to 8
     // The main box's speed line and the gap above the log are a row each.
-    const used = (panels.includes('office') ? 1 + officeRows(people) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+    const used = (panels.includes('office') ? 2 + officeRows(people) : 0) + 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
     const nLog = logRows(bodyRows, used)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)

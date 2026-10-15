@@ -126,6 +126,51 @@
       "description": "Comma-separated context-fill percentages that raise a toast",
       "type": "string",
       "default": "70,90"
+    },
+    "routing": {
+      "title": "Supervisor",
+      "description": "auto: route each prompt to a light, standard or heavy model and effort when the switch pays for its re-cache; off: always the session's own model",
+      "type": "string",
+      "options": [
+        "auto",
+        "off"
+      ],
+      "default": "auto"
+    },
+    "lightModel": {
+      "title": "Light model",
+      "description": "Model for quick questions",
+      "type": "string",
+      "default": "claude-haiku-4-5"
+    },
+    "heavyModel": {
+      "title": "Heavy model",
+      "description": "Model for design, debugging, refactors and long briefs",
+      "type": "string",
+      "default": "claude-opus-5-5"
+    },
+    "lightEffort": {
+      "title": "Light effort",
+      "description": "Effort for quick questions (models without effort ignore it)",
+      "type": "string",
+      "options": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "default": "low"
+    },
+    "heavyEffort": {
+      "title": "Heavy effort",
+      "description": "Effort for heavy work",
+      "type": "string",
+      "options": [
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "high"
     }
   },
   "contributors": [

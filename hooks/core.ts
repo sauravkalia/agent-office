@@ -21,6 +21,8 @@ import type {
   View,
 } from '../types'
 
+import type { Effort, SupervisorConfig } from './supervisor-core'
+
 export const SCHEMA_VERSION = 2
 
 // ---------------------------------------------------------------- defaults
@@ -113,6 +115,9 @@ export type Config = {
   costWarnPct: number[]
   /** Context fill percentages that raise a toast, ascending. */
   contextWarnPct: number[]
+  /** The supervisor: route each prompt to a model and effort, or leave the session's own. */
+  routing: 'auto' | 'off'
+  supervisor: SupervisorConfig
 }
 
 /** `"80, 50,x,120"` → `[50, 80]`: whole percentages from 1 to 100, sorted, each once. */
@@ -120,6 +125,9 @@ export const percentList = (s: string, fallback: number[]): number[] => {
   const out = [...new Set(s.split(',').map(x => Math.round(Number(x.trim()))).filter(n => Number.isFinite(n) && n >= 1 && n <= 100))]
   return out.length > 0 ? out.sort((a, b) => a - b) : fallback
 }
+
+const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+const effortOf = (s: string, d: Effort): Effort => ((EFFORTS as readonly string[]).includes(s) ? (s as Effort) : d)
 
 const safeRegExp = (source: string, fallback: string) => {
   try {
@@ -155,6 +163,13 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     costBudgetUsd: typeof o.costBudgetUsd === 'number' && o.costBudgetUsd >= 0 ? o.costBudgetUsd : 5,
     costWarnPct: percentList(str('costWarnPct', ''), [50, 80, 100]),
     contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
+    routing: str('routing', 'auto') === 'off' ? 'off' : 'auto',
+    supervisor: {
+      lightModel: str('lightModel', 'claude-haiku-4-5'),
+      heavyModel: str('heavyModel', 'claude-opus-5-5'),
+      lightEffort: effortOf(str('lightEffort', ''), 'low'),
+      heavyEffort: effortOf(str('heavyEffort', ''), 'high'),
+    },
   }
 }
 

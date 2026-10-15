@@ -110,6 +110,22 @@ export type Errand = { tool: string; text: string; toolUseId: string; at: number
 /** Each worker's errand, keyed by agent id; `main` is the main loop. */
 export type Errands = Record<string, Errand>
 
+/** The supervisor's state: what the main loop runs on now, and what it decided last. */
+export type Route = {
+  /** Set by `/office route` for this session: auto routes each prompt, off leaves the session alone, a tier pins it. null: the configured `routing`. */
+  override: 'auto' | 'off' | 'light' | 'standard' | 'heavy' | null
+  /** null model or effort: the session's own. */
+  current: { model: string | null; effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null }
+  /** The session's own model and effort, as the engine names them before the supervisor's rewrite. */
+  base: { model: string; effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null } | null
+  lastStepAt: number
+  /** The prompt you just typed, decided on at the turn's first request (when the session model is known). */
+  pending: string | null
+  last: { tier: string; why: string; note: string; isSwitch: boolean } | null
+  savedUsd: number
+  switches: number
+}
+
 /** One person in the office drawing. */
 export type Person = {
   id: string
@@ -138,6 +154,7 @@ declare module 'claude-code' {
       errands: Errands
       alerts: { fired: string[] }
       sessionDay: { day: string }
+      route: Route
     }
   }
 }
