@@ -44,7 +44,7 @@
       "title": "Panels",
       "description": "Comma-separated panels in display order: office, main, architect, gate, agents, loops, receipt, log. Leave one out to hide it.",
       "type": "string",
-      "default": "office,main,architect,gate,agents,loops,receipt,log"
+      "default": "office,main,agents,gate,architect,receipt,loops,log"
     },
     "motion": {
       "title": "Motion",
@@ -88,13 +88,14 @@
     },
     "palette": {
       "title": "Palette",
-      "description": "theme follows your Claude Code theme (light, dark, colour-blind); pastel is fixed colours tuned for dark terminals",
+      "description": "office is warm wood and lamplight for dark terminals; theme follows your Claude Code theme (light, dark, colour-blind); pastel is fixed colours tuned for dark terminals",
       "type": "string",
       "options": [
+        "office",
         "theme",
         "pastel"
       ],
-      "default": "theme"
+      "default": "office"
     },
     "openOnStart": {
       "title": "Open on start",

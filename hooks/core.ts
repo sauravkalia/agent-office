@@ -92,7 +92,7 @@ export const normalizeLog = (stored: unknown): LogLine[] =>
 // ---------------------------------------------------------------- config
 
 export type Panel = 'office' | 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'receipt' | 'log'
-const PANELS: readonly Panel[] = ['office', 'main', 'architect', 'gate', 'agents', 'loops', 'receipt', 'log']
+const PANELS: readonly Panel[] = ['office', 'main', 'agents', 'gate', 'architect', 'receipt', 'loops', 'log']
 
 export type Config = {
   architect: RegExp
@@ -149,7 +149,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     matchDescriptions: bool('matchDescriptions', false),
     maxCards: Math.min(6, Math.max(1, max)),
     layout: layout === 'compact' || layout === 'wide' || layout === 'mini' ? layout : 'auto',
-    palette: str('palette', 'theme') === 'pastel' ? 'pastel' : 'theme',
+    palette: ((p: string): Palette => (p === 'pastel' || p === 'office' ? p : 'theme'))(str('palette', 'theme')),
     openOnStart: bool('openOnStart', true),
     statusLine: bool('statusLine', true),
     costBudgetUsd: typeof o.costBudgetUsd === 'number' && o.costBudgetUsd >= 0 ? o.costBudgetUsd : 5,
@@ -160,12 +160,12 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
 
 // ---------------------------------------------------------------- palette
 
-export type Palette = 'theme' | 'pastel'
+export type Palette = 'theme' | 'pastel' | 'office'
 export type Colors = Record<'main' | 'agent' | 'gate' | 'cleared' | 'arch' | 'amber' | 'warn' | 'dim' | 'faint' | 'text', string>
 
 /**
  * `theme` names the person's own theme colours (they follow light, dark and colour-blind themes);
- * `pastel` is fixed hex tuned for dark terminals.
+ * `pastel` is fixed hex tuned for dark terminals; `office` is warm wood and lamplight, for dark terminals too.
  */
 export const PALETTES: Record<Palette, Colors> = {
   theme: {
@@ -191,6 +191,18 @@ export const PALETTES: Record<Palette, Colors> = {
     dim: '#6b7280',
     faint: '#3f4654',
     text: '#e5e7eb',
+  },
+  office: {
+    main: '#f4a261',
+    agent: '#8ecae6',
+    gate: '#90be6d',
+    cleared: '#43aa8b',
+    arch: '#cdb4db',
+    amber: '#f9c74f',
+    warn: '#f9844a',
+    dim: '#b08968',
+    faint: '#7f5539',
+    text: '#ede0d4',
   },
 }
 

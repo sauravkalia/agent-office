@@ -287,7 +287,15 @@ test('/clear starts the pane fresh', async ($, on) => {
   await ui.unmount()
 })
 
-test('colours come from the theme by default, raw hex only when asked', async ($, on) => {
+test('the office palette is the default: warm fixed colours', async ($, on) => {
+  engine(on)
+  const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })
+  const title = await ui.find({ text: /· main$/ })
+  expect(title?.props.color).toBe('#f4a261')
+  await ui.unmount()
+})
+
+test('palette theme follows the Claude Code theme colours', { options: { palette: 'theme' } }, async ($, on) => {
   engine(on)
   const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })
   const title = await ui.find({ text: /· main$/ })
