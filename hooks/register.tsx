@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentCard, Architect, Building, Bucket, Dispatch, LiveSession, Check, Gate, Layout, LogLine, Loop, Main, Person, Roster, Route, Turn, Usage, View } from '../types'
+import type { AgentCard, Architect, Building, Bucket, Dispatch, LiveSession, SessionStatus, Check, Gate, Layout, LogLine, Loop, Main, Person, Roster, Route, Turn, Usage, View } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -64,12 +64,18 @@ import {
 import type { Config, Panel } from './core'
 import { base64, drawOffice, encodePng, rowsFor, termShowsImages } from './pixel-core'
 import type { Walk } from './pixel-core'
+import { parseStatus } from './status-core'
+import { direct, newDirector } from './dept-office'
+import type { DeptInput, SlotInfo } from './dept-office'
+import { AW as ART_W, AH as ART_H, HQ_SLOT, ROOM_ZONES, drawScene, lookOf, parseCell, pixelBox, scaleInto } from './pixel2-core'
+import type { RoomZone } from './pixel2-core'
+import { encodePngRgb } from './png-core'
 import { answerDispatch, crossMessageOf, deptOfSession, desksOf, rosterText } from './departments-core'
 import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
 import { SESSION, applyTarget, classify, decide } from './supervisor-core'
 import type { Tier } from './supervisor-core'
 import { STORE_PREFIX, dayOf, lastDays, normalizeDay, recordTurn, staleKeys, usageReport } from './usage-core'
-import { ROOMS, finishErrand, namesFor, normalizeErrands, officeLine, officeRows, officeScene, orgLine, roleOf, roomLabel, startErrand, teamOf } from './office-core'
+import { ROOMS, zoneOf, finishErrand, namesFor, normalizeErrands, officeLine, officeRows, officeScene, orgLine, roleOf, roomLabel, startErrand, teamOf } from './office-core'
 
 const PANE = 'agent-office'
 const TITLE = 'Agent Office'
@@ -273,6 +279,9 @@ async function pruneUsage($: EngineInterface) {
 
 const PROMPT_CACHE_MS = 60 * 60_000
 
+/** The department office has four shared rooms; the text office's other rooms count as the desk. */
+const ROOM_OF: Partial<Record<string, string>> = { archives: 'archives', warehouse: 'warehouse', server: 'server', workshop: 'workshop' }
+
 /**
  * The supervisor at the start of a turn you typed: classify the prompt, then move the main loop to
  * that tier's model and effort if the move pays for its re-cache (always, for an upgrade or a pin).
@@ -317,7 +326,7 @@ async function supervise($: EngineInterface, cfg: Config, text: string, base: No
  * Looks around the machine: the running sessions in ~/.claude/sessions (only its *.json files; the
  * .key files beside them are never read), and the history file when it changed since the last look.
  */
-async function scanBuilding($: EngineInterface, withHistory = true) {
+async function scanBuilding($: EngineInterface, cfg: Config, withHistory = true) {
   const home = await $.env.get('HOME')
   if (!home) return
   const now = await $.clock.now()
@@ -333,6 +342,14 @@ async function scanBuilding($: EngineInterface, withHistory = true) {
   } catch {
     problem = 'the session registry is not readable'
   }
+  // Department sessions say which room they're working in (status files written by their own mod).
+  const status: Record<string, SessionStatus> = {}
+  if (cfg.departments.length > 0)
+    for (const s of live) {
+      const text = await $.fs.read(`${home}/.claude/agent-office/status/${s.sessionId}.json`).catch(() => '')
+      const st = parseStatus(text)
+      if (st) status[s.sessionId] = st
+    }
   let past = was.past
   let historyMtime = was.historyMtime
   if (withHistory) {
@@ -346,7 +363,22 @@ async function scanBuilding($: EngineInterface, withHistory = true) {
       problem = problem ?? 'the prompt history is not readable (over 4 MB?)'
     }
   }
-  await update($, building, () => ({ live, past, scannedAt: now, historyMtime, problem }))
+  await update($, building, () => ({ live, past, scannedAt: now, historyMtime, problem, status }))
+}
+
+/**
+ * This session's status file, for the department office in HQ: the room it's working in now and
+ * what it's doing. Written when the room or the line changes, at most every second otherwise.
+ */
+let lastStatus = { key: '', at: 0 }
+async function writeStatus($: EngineInterface, zone: string, text: string, isError = false) {
+  const now = await $.clock.now()
+  const key = `${zone}|${text}|${isError}`
+  if (key === lastStatus.key && now - lastStatus.at < 1000) return
+  lastStatus = { key, at: now }
+  const [home, sid] = await Promise.all([$.env.get('HOME'), $.session.id().catch(() => '')])
+  if (!home || !sid) return
+  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now }))
 }
 
 /** `/office route [auto|off|light|standard|heavy]`: show or set the supervisor. */
@@ -392,7 +424,7 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
   if (verb === 'building' || verb === 'office') {
     const scene: 'building' | 'office' = verb
     await update($, view, v => ({ ...normalize(DEFAULT_VIEW, v), scene }))
-    if (scene === 'building') await scanBuilding($).catch(() => undefined)
+    if (scene === 'building') await scanBuilding($, cfg).catch(() => undefined)
     const opened = await openPane($)
     return { text: opened.isPlaced ? (scene === 'building' ? 'Showing every session on this machine.' : 'Showing this session\'s office.') : `Not shown yet: ${opened.reason}` }
   }
@@ -416,7 +448,7 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
   if (verb === 'route') return { text: await routeText($, cfg, arg) }
   if (verb === 'departments') {
     if (cfg.departments.length === 0) return { text: 'No departments set. Add them in /config → agent-office → Departments.' }
-    await scanBuilding($, false).catch(() => undefined)
+    await scanBuilding($, cfg, false).catch(() => undefined)
     const [b, selfId] = await Promise.all([read($, building).then(x => normalize(DEFAULT_BUILDING, x)), $.session.id().catch(() => '')])
     return { text: rosterText(cfg.departments, b.live, selfId, b.live.find(s => s.sessionId === selfId)?.name ?? '') }
   }
@@ -457,6 +489,15 @@ export const register: Register = (on, options) => {
     }
     return base64(encodePng(drawOffice(people, walks, Math.floor(now / 400))))
   }
+  // The department office (pixel mode with departments): its director keeps the actors between frames.
+  const director = newDirector()
+  const cell = parseCell(cfg.cellPx)
+  let shownDept: { input: DeptInput; scale: number; cols: number; rows: number; width: number; height: number } | null = null
+  const deptFrame = (input: DeptInput, now: number, box: { scale: number; width: number; height: number }) => {
+    const { scene, moving } = direct(director, input, now)
+    const art = drawScene(scene, Math.floor(now / 83), now)
+    return { png: base64(encodePngRgb(box.width, box.height, scaleInto(art, box.scale, box.width, box.height))), moving }
+  }
   // tool.check carries no loop id; the tool.call around it does, keyed by the call's id.
   const callLoop = new Map<string, string | null>()
 
@@ -495,11 +536,26 @@ export const register: Register = (on, options) => {
         if (/alt|placeholder|image/i.test(r.deny)) await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: true }))
       }
     })
-    // Every 5 s: the whole building while it's on screen (history only when it changed); otherwise
+    // The department office: about twelve frames a second while anyone moves, three when all is still.
+    let deptTick = 0
+    $.clock.every(83, async () => {
+      if (!shownDept) return
+      deptTick += 1
+      const now = await $.clock.now()
+      const s = shownDept
+      const { png, moving } = deptFrame(s.input, now, s)
+      if (!moving && deptTick % 4 !== 0) return
+      const r = await $.ui.blit({ requestId: PANE, key: 'office-dept', source: { png }, columns: s.cols, rows: s.rows })
+      if (r.deny) {
+        shownDept = null
+        if (/alt|placeholder|image/i.test(r.deny)) await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: true }))
+      }
+    })
+    // Every 2 s: the whole building while it's on screen (history only when it changed); otherwise
     // just the running sessions, when there are departments to staff.
-    $.clock.every(5000, async () => {
+    $.clock.every(2000, async () => {
       const isBuilding = normalize(DEFAULT_VIEW, await read($, view)).scene === 'building'
-      if (isBuilding || cfg.departments.length > 0) await scanBuilding($, isBuilding).catch(() => undefined)
+      if (isBuilding || cfg.departments.length > 0) await scanBuilding($, cfg, isBuilding).catch(() => undefined)
     })
     void pruneUsage($).catch(() => undefined)
     // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
@@ -534,7 +590,7 @@ export const register: Register = (on, options) => {
   // The roster rides in the command's arguments, which the playbook's prompt carries to the model.
   on('command.run', async ($, e, next) => {
     if (!/(^|:)assign$/.test(e.command) || cfg.departments.length === 0) return next(e)
-    await scanBuilding($, false).catch(() => undefined)
+    await scanBuilding($, cfg, false).catch(() => undefined)
     const [b, selfId] = await Promise.all([read($, building).then(x => normalize(DEFAULT_BUILDING, x)), $.session.id().catch(() => '')])
     const hqName = b.live.find(s => s.sessionId === selfId)?.name ?? ''
     const staffed = cfg.departments.filter(d => desksOf(d, b.live, selfId).some(k => k.session)).length
@@ -704,9 +760,12 @@ export const register: Register = (on, options) => {
       const errand = { tool: e.tool, text: shorten(describeInput(e.tool, e), 64), toolUseId: e.tool_use_id, at: await $.clock.now() }
       await update($, errands, x => startErrand(normalizeErrands(x), who, errand))
     }
+    const room = ROOM_OF[zoneOf(e.tool)] ?? 'desk'
+    if (isErrand) void writeStatus($, room, shorten(describeInput(e.tool, e), 40)).catch(() => undefined)
     const ran = await next(e).finally(() => callLoop.delete(e.tool_use_id))
     const didRun = ran.deny === undefined
     if (isErrand) await update($, errands, x => finishErrand(normalizeErrands(x), who, e.tool_use_id, !didRun || ran.isError === true))
+    if (isErrand && room === 'server' && ran.isError === true) void writeStatus($, room, shorten(describeInput(e.tool, e), 40), true).catch(() => undefined)
     // Settle this call's pending ask, if it had one; skip the write (and the redraw) otherwise.
     const g0 = await getGate($)
     const isSettled = settleCheck(g0, e.tool_use_id, didRun) !== g0
@@ -841,6 +900,7 @@ export const register: Register = (on, options) => {
       await update($, receipt, () => r)
       await logUsage($, r.agents).catch(() => undefined)
       await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: false }))
+      void writeStatus($, 'desk', '').catch(() => undefined)
       // The manager walks back to the desk between turns.
       await update($, errands, x => Object.fromEntries(Object.entries(normalizeErrands(x)).filter(([k]) => k !== 'main')))
       await refreshStatus($, cfg)
@@ -954,7 +1014,7 @@ export const register: Register = (on, options) => {
         onPress={async () => {
           const scene: 'office' | 'building' = isBuilding ? 'office' : 'building'
           await update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), scene }))
-          if (!isBuilding) await scanBuilding($).catch(() => undefined)
+          if (!isBuilding) await scanBuilding($, cfg).catch(() => undefined)
         }}
       />
     )
@@ -1096,11 +1156,99 @@ export const register: Register = (on, options) => {
     // SVG on the other surfaces; null keeps the text office (opted out, or no pictures here)
     const isPixel = (v.style ?? cfg.officeStyle) === 'pixel'
     const nextStyle: 'text' | 'pixel' = isPixel ? 'text' : 'pixel'
+    // The department office: a person per department, HQ in the middle, rooms on top.
+    const folderOfCwd = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() ?? ''
+    const deptInput = (): DeptInput => {
+      const selfLive = bld.live.find(s => s.sessionId === selfId)
+      const selfIsDept = cfg.departments.some(d => desksOf(d, bld.live, selfId).some(k => k.isSelf))
+      const hqLive = bld.live.find(s => folderOfCwd(s.cwd) === 'hq') ?? (selfIsDept ? undefined : selfLive)
+      const stateOf = (s: LiveSession | undefined | null) => (!s ? 'closed' : s.sessionId === selfId ? (m.isRunning ? 'busy' : 'idle') : s.status === 'busy' ? 'busy' : 'idle') as SlotInfo['state']
+      const slots: SlotInfo[] = [{ slot: HQ_SLOT, label: 'HQ', look: 'hq', state: stateOf(hqLive), dispatch: null, zone: null, isError: false }]
+      cfg.departments.slice(0, 5).forEach((d, i) => {
+        const desks = desksOf(d, bld.live, selfId).filter(k => k.session)
+        const desk = desks.find(k => (k.isSelf ? m.isRunning : k.session?.status === 'busy')) ?? desks[0]
+        const st = desk?.session ? bld.status?.[desk.session.sessionId] : undefined
+        const zone = st && (ROOM_ZONES as readonly string[]).includes(st.zone) ? (st.zone as RoomZone) : null
+        slots.push({ slot: [0, 2, 3, 4, 5][i]!, label: d.label, look: lookOf(d.label), state: stateOf(desk?.session), dispatch: [...sent].reverse().find(x => x.dept === d.label) ?? null, zone, isError: st?.isError ?? false })
+      })
+      const t = new Date(now)
+      return { slots, hour: t.getHours(), minute: t.getMinutes() }
+    }
+    const ROOM_LABEL: Record<RoomZone, string> = { archives: 'Archives', warehouse: 'Warehouse', server: 'Server Rm', workshop: 'Workshop' }
+    const deptLabels = (input: DeptInput, cols: number) => {
+      const colW = Math.max(12, Math.floor(cols / 3))
+      const bySlot = new Map(input.slots.map(s => [s.slot, s]))
+      const cellFor = (slot: number) => {
+        const s = bySlot.get(slot)
+        if (!s) return [{ text: '', color: C.faint }, { text: '', color: C.faint }]
+        const d = s.dispatch
+        const fresh = d?.status === 'replied' && now - (d.endedAt ?? d.at) < 15 * 60_000
+        const st = s.state === 'closed' ? '○ not open' : d?.status === 'sent' ? '→ on a task' : fresh ? '✓ replied' : s.state === 'busy' ? '● busy' : 'z idle'
+        const color = s.state === 'closed' ? C.faint : d?.status === 'sent' ? C.amber : fresh ? C.gate : s.state === 'busy' ? (s.slot === HQ_SLOT ? C.main : C.agent) : C.dim
+        const line2 = s.state === 'closed' ? 'open its tab to staff' : d?.status === 'sent' ? `→ ${d.task}` : fresh ? `✓ ${d.reply ?? ''}` : s.zone ? `${ROOM_LABEL[s.zone]}` : s.state === 'busy' ? 'at the desk' : ''
+        return [
+          { text: shorten(`${s.label}  ${st}`, colW - 1), color },
+          { text: shorten(line2, colW - 1), color: C.dim },
+        ]
+      }
+      return [[0, 1, 2], [3, 4, 5]].map(row => (
+        <Box flexDirection="column">
+          {[0, 1].map(line => (
+            <Box>
+              {row.map(slot => {
+                const c = cellFor(slot)[line]!
+                return (
+                  <Box width={colW}>
+                    <Text color={c.color} bold={line === 0} wrap="truncate">
+                      {c.text}
+                    </Text>
+                  </Box>
+                )
+              })}
+            </Box>
+          ))}
+        </Box>
+      ))
+    }
+    const deptFloor = (w: number) => {
+      const input = deptInput()
+      if (e.surface === 'terminal') {
+        if (!pxEnv?.images || pxEnv.denied || !('Image' in els)) {
+          shownDept = null
+          return null
+        }
+        const box = pixelBox(w, cell.w, cell.h)
+        shownDept = { input, ...box }
+        const { Image } = els
+        return (
+          <Box flexDirection="column" width={w}>
+            <Image key="office-dept" source={{ png: deptFrame(input, now, box).png }} columns={box.cols} rows={box.rows} alt={input.slots.map(s => `${s.label} ${s.state}`).join(' · ')} />
+            {deptLabels(input, box.cols)}
+          </Box>
+        )
+      }
+      shownDept = null
+      if (!('Svg' in els)) return null
+      const { Svg } = els
+      const png = deptFrame(input, now, { scale: 2, width: ART_W * 2, height: ART_H * 2 }).png
+      return (
+        <Box flexDirection="column" width={w}>
+          <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${ART_W * 3}" height="${ART_H * 3}" viewBox="0 0 ${ART_W * 2} ${ART_H * 2}"><image href="data:image/png;base64,${png}" width="${ART_W * 2}" height="${ART_H * 2}" style="image-rendering:pixelated"/></svg>`} alt="department office" width={ART_W * 3} height={ART_H * 3} />
+          {deptLabels(input, 72)}
+        </Box>
+      )
+    }
     const pixelFloor = (w: number) => {
       if (!isPixel || isBuilding) {
         shown = null
+        shownDept = null
         return null
       }
+      if (cfg.departments.length > 0) {
+        shown = null
+        return deptFloor(w)
+      }
+      shownDept = null
       const caption = (
         <Box flexDirection="column" width={w}>
           {[...people]
@@ -1149,7 +1297,12 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const officePanel = (w: number) => isBuilding ? buildingPanel(w) : (
+    const officePanel = (w: number) => {
+      if (isBuilding) return buildingPanel(w)
+      const floor = pixelFloor(w)
+      // In the department office the picture is the org chart; the text one would only repeat it.
+      const showOrg = !(floor && cfg.departments.length > 0)
+      return (
       <Box flexDirection="column" width={w}>
         <Box justifyContent="space-between" width={w}>
           <Text bold>{`office · ${atWork} at work`}</Text>
@@ -1165,8 +1318,8 @@ export const register: Register = (on, options) => {
             <Text color={C.dim}>{`${rt.last.tier} (${rt.last.why}) ${rt.last.note}`}</Text>
           </Text>
         ) : null}
-        {orgChart(w)}
-        {pixelFloor(w) ?? (hasClient ? (
+        {showOrg ? orgChart(w) : null}
+        {floor ?? (hasClient ? (
           <els.Client
             key="office"
             module="./office.tsx"
@@ -1190,6 +1343,7 @@ export const register: Register = (on, options) => {
         ))}
       </Box>
     )
+    }
 
     // ---- main
     const effortN = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }[m.effort] ?? 0

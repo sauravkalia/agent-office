@@ -85,7 +85,7 @@ const setup = (on: On, env: Record<string, string>) => {
   return clock
 }
 
-test('pixel office in a terminal that shows pictures: an Image, and the caption in words', async ($, on) => {
+test('pixel office in a terminal that shows pictures: an Image, and the caption in words', { options: { departments: '' } }, async ($, on) => {
   setup(on, { TERM_PROGRAM: 'ghostty' })
   await $.session.start({ cwd: '/u/me/proj', surface: 'terminal', isInteractive: true } as never)
   const out = await $.command.run({ command: 'office', args: 'pixel', origin: { kind: 'user' } } as never)
@@ -103,7 +103,7 @@ test('pixel office in a terminal that shows pictures: an Image, and the caption 
   await ui.unmount()
 })
 
-test('a terminal without pictures keeps the text office, unchanged', async ($, on) => {
+test('a terminal without pictures keeps the text office, unchanged', { options: { departments: '' } }, async ($, on) => {
   setup(on, { TERM_PROGRAM: 'Apple_Terminal' })
   await $.session.start({ cwd: '/u/me/proj', surface: 'terminal', isInteractive: true } as never)
   const out = await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
@@ -114,7 +114,7 @@ test('a terminal without pictures keeps the text office, unchanged', async ($, o
   await ui.unmount()
 })
 
-test('the desktop app shows the pixel office as an SVG', async ($, on) => {
+test('the desktop app shows the pixel office as an SVG', { options: { departments: '' } }, async ($, on) => {
   setup(on, {})
   await $.session.start({ cwd: '/u/me/proj', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
@@ -124,10 +124,67 @@ test('the desktop app shows the pixel office as an SVG', async ($, on) => {
   await ui.unmount()
 })
 
-test('officeStyle: pixel makes it the default', { options: { officeStyle: 'pixel' } }, async ($, on) => {
+test('officeStyle: pixel makes it the default', { options: { officeStyle: 'pixel', departments: '' } }, async ($, on) => {
   setup(on, { TERM: 'xterm-kitty' })
   await $.session.start({ cwd: '/u/me/proj', surface: 'terminal', isInteractive: true } as never)
   const ui = await $.ui.mount(pane('terminal'))
   expect(await ui.find({ type: 'Image', key: 'office-px' })).toBeDefined()
+  await ui.unmount()
+})
+
+// ---------------------------------------------------------------- the department office
+
+const DEPTS = 'PR Review=pr-reviews: reviews | Sphere Dev=GitHub: Sphere code | Social=social-expert: posts'
+const registry = [
+  { sessionId: 'hq', name: 'hq-1', cwd: '/u/hq', status: 'busy', kind: 'interactive', updatedAt: 1 },
+  { sessionId: 'pr', name: 'pr-1', cwd: '/u/pr-reviews', status: 'idle', kind: 'interactive', updatedAt: 1 },
+  { sessionId: 'gh', name: 'github-1', cwd: '/u/GitHub', status: 'busy', kind: 'interactive', updatedAt: 1 },
+]
+const files = (statusZone: string): Record<string, string> => ({
+  ...Object.fromEntries(registry.map((s, i) => [`/h/.claude/sessions/${i}.json`, JSON.stringify(s)])),
+  '/h/.claude/agent-office/status/gh.json': JSON.stringify({ zone: statusZone, text: 'WebSearch → radar chart', isError: false, at: 1 }),
+})
+const deptSetup = (on: On, zone: string) => {
+  setup(on, { TERM_PROGRAM: 'ghostty', HOME: '/h' })
+  const fs = files(zone)
+  on('session.id', () => ({ value: 'hq' }))
+  on('fs.list', () => ({ value: registry.map((_, i) => ({ name: `${i}.json`, kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false })) }))
+  on('fs.read', (_$, e) => {
+    const v = fs[(e as { path: string }).path]
+    return v === undefined ? { deny: 'missing' } : { value: v }
+  })
+  on('fs.stat', () => ({ deny: 'missing' }))
+  on('fs.write', () => ({ value: undefined }))
+}
+
+test('the department office: one sharp picture of whole cells, a label per desk', { options: { departments: DEPTS, cellPx: '7x17' } }, async ($, on) => {
+  deptSetup(on, 'warehouse')
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
+  const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
+  const img = await ui.find({ type: 'Image', key: 'office-dept' })
+  expect(img?.props).toMatchObject({ columns: 72, rows: 27 })
+  expect(String((img?.props as { source?: { png?: string } })?.source?.png ?? '').startsWith('iVBORw0KGgo')).toBe(true)
+  expect(await ui.find({ text: /^PR Review z idle/ })).toBeDefined()
+  expect(await ui.find({ text: /^HQ z idle/ })).toBeDefined()
+  expect(await ui.find({ text: /^Sphere Dev ● busy/ })).toBeDefined()
+  expect(await ui.find({ text: /^Warehouse$/ })).toBeDefined()
+  expect(await ui.find({ text: /^Social ○ not open/ })).toBeDefined()
+  // The picture is the org chart here; the text one isn't repeated above it.
+  expect(await ui.find({ text: /HQ supervisor/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a task HQ sends shows on the desk as on its way', { options: { departments: DEPTS } }, async ($, on) => {
+  deptSetup(on, 'desk')
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
+  await $.turn.start({ text: 'fix it', turnId: 'D1' })
+  await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: fix RadarChart' } as never)
+  const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
+  expect(await ui.find({ text: /^Sphere Dev → on a task/ })).toBeDefined()
+  expect(await ui.find({ text: /^→ fix RadarChart/ })).toBeDefined()
   await ui.unmount()
 })

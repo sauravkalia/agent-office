@@ -187,6 +187,12 @@
         "pixel"
       ],
       "default": "text"
+    },
+    "cellPx": {
+      "title": "Cell size (px)",
+      "description": "Your terminal's character cell in pixels, as WxH (e.g. 7x17). The pixel office is drawn to fill whole cells exactly, so it stays sharp. Find it with: python3 -c \"import fcntl,termios,struct;r,c,x,y=struct.unpack('HHHH',fcntl.ioctl(1,termios.TIOCGWINSZ,b'0'*8));print(f'{x//c}x{y//r}')\"",
+      "type": "string",
+      "default": "7x17"
     }
   },
   "contributors": [

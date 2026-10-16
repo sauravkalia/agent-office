@@ -124,6 +124,8 @@ export type Config = {
   departments: Department[]
   /** The office floor's default look: the text rooms, or pixel art where the terminal shows pictures. */
   officeStyle: 'text' | 'pixel'
+  /** The terminal's character cell in pixels, `WxH`: the pixel office is drawn to fill whole cells exactly. */
+  cellPx: string
 }
 
 /** `"80, 50,x,120"` → `[50, 80]`: whole percentages from 1 to 100, sorted, each once. */
@@ -171,6 +173,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
     routing: str('routing', 'auto') === 'off' ? 'off' : 'auto',
     officeStyle: str('officeStyle', 'text') === 'pixel' ? 'pixel' : 'text',
+    cellPx: str('cellPx', '7x17'),
     departments: parseDepartments(typeof o.departments === 'string' ? o.departments : ''),
     supervisor: {
       lightModel: str('lightModel', 'claude-haiku-4-5'),

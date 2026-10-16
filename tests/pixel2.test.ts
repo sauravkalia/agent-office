@@ -110,3 +110,37 @@ test('frames encode to small PNGs', () => {
   expect([...png.slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
   expect(png.length).toBeLessThan(60_000)
 })
+
+// ---------------------------------------------------------------- the director
+
+import { direct, newDirector } from '../hooks/dept-office'
+import type { SlotInfo } from '../hooks/dept-office'
+
+const slots = (over: Partial<SlotInfo> = {}): SlotInfo[] => [
+  { slot: 1, label: 'HQ', look: 'hq', state: 'busy', dispatch: null, zone: null, isError: false },
+  { slot: 2, label: 'Sphere Dev', look: 'sphere', state: 'busy', dispatch: null, zone: null, isError: false, ...over },
+]
+
+test('the director walks a department to HQ for a fresh task, but not for old news', () => {
+  const d = newDirector()
+  direct(d, { slots: slots(), hour: 10, minute: 0 }, 0)
+  const task = { to: 'github-1', dept: 'Sphere Dev', folder: 'GitHub', task: 'fix', at: 1_000, status: 'sent' as const }
+  const r = direct(d, { slots: slots({ dispatch: task }), hour: 10, minute: 0 }, 1_100)
+  expect(r.moving).toBe(true)
+  expect(r.scene.away.has(2)).toBe(true)
+  const old = newDirector()
+  const r2 = direct(old, { slots: slots({ dispatch: { ...task, at: 0 } }), hour: 10, minute: 0 }, 120_000)
+  expect(r2.scene.away.has(2)).toBe(false)
+  expect(r2.scene.desks.find(x => x.slot === 2)?.bubble).toBe('sent')
+})
+
+test('the director sends a busy department to the room its status names, and home again', () => {
+  const d = newDirector()
+  direct(d, { slots: slots({ zone: 'warehouse' }), hour: 10, minute: 0 }, 0)
+  const later = direct(d, { slots: slots({ zone: 'warehouse' }), hour: 10, minute: 0 }, 20_000)
+  expect(later.scene.rooms.map(r => r.zone)).toEqual(['warehouse'])
+  direct(d, { slots: slots({ zone: null }), hour: 10, minute: 0 }, 20_100)
+  const home = direct(d, { slots: slots({ zone: null }), hour: 10, minute: 0 }, 40_000)
+  expect(home.scene.away.has(2)).toBe(false)
+  expect(home.scene.rooms).toEqual([])
+})

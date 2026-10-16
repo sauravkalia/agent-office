@@ -127,7 +127,18 @@ export type Dispatch = {
 }
 
 /** What the last scan of the machine found. */
-export type Building = { live: LiveSession[]; past: PastSession[]; scannedAt: number; historyMtime: number; problem: string | null }
+/** What a session last wrote about itself for the department office: which room it's working in. */
+export type SessionStatus = { zone: string; text: string; isError: boolean; at: number }
+
+export type Building = {
+  live: LiveSession[]
+  past: PastSession[]
+  scannedAt: number
+  historyMtime: number
+  problem: string | null
+  /** Each running session's status file, by session id; absent for sessions that don't write one. */
+  status?: Record<string, SessionStatus>
+}
 
 export type Roster = { architectTypes: string[] }
 
