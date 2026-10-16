@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0
+
+- **Department office** (pixel mode with departments): a person per department at their own desk, HQ in the middle, and shared rooms with their names on the door (Archives, Warehouse, Server Rm, Workshop). People walk to HQ to collect a brief and carry it back, go to the room their session is working in, and bring a ✓ to HQ's in-tray (confetti) when they reply. Plus a 4-step eased walk, breathing, blinking, typing, coffee steam, bubbles that pop in, a red flash on failing commands, and window light that follows your clock.
+- **Sharp pixels:** drawn at a whole-number scale into whole terminal cells (`cellPx`, default `7x17`), so the terminal never stretches it. That stretching was why 0.10 looked blurry. A real deflate keeps sharp frames around 20 KB.
+- Every tab writes a tiny status file (`~/.claude/agent-office/status/<session>.json`) naming the room it's working in; HQ reads the running departments' files every 2 s.
+
 ## 0.10.0
 
 - **Pixel office** (opt-in): `/office pixel` or `p` draws the office as original pixel art. It's an inline picture in kitty, Ghostty and WezTerm, animated with `$.ui.blit` while someone works or walks, and an SVG in the desktop app. Terminals that can't show pictures keep the text office unchanged; detection comes from the terminal's environment and is confirmed when a blit is refused. `officeStyle: pixel` makes it the default. The art is drawn in code, so no sprite files are copied.

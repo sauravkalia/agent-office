@@ -56,15 +56,30 @@ Each worker keeps the same name for the session and mutters something about the 
 
 ## Pixel office (opt-in)
 
-<p align="center"><img src="docs/media/pixel-office.png" alt="The pixel office: eight rooms in two rows with a hallway between, the boss in the meeting room, staff researching in the warehouse, building in the workshop, waiting at the HR desk with a question mark, and on a coffee break" width="640"></p>
+<p align="center"><img src="docs/media/pixel-v3-storyboard.png" alt="Eight frames of the department office: HQ calls Sphere Dev, who walks to HQ for the brief, carries it back, visits the Archives, Warehouse, Workshop and Server Room, then carries the result to HQ for a burst of confetti" width="820"></p>
 
-`/office pixel` (or `p` in the pane) draws the same office as pixel art: the eight rooms with their furniture (shelves, crates, a workbench that sparks, server racks with blinking lights, the whiteboard, the HR desk, the coffee machine), staff in their own shirt colours (the boss in a tie), `?` over whoever needs your OK, `!` on trouble, a cup on a break, and walkers crossing the hallway. Names and what each person is doing stay as text under the picture.
+`/office pixel` (or `p` in the pane) draws your **departments as an office**: a person per department at their own desk, HQ in the middle, and four shared rooms on top: **Archives**, **Warehouse**, **Server Rm** and **Workshop**.
 
-- **Terminals:** an inline picture over the kitty graphics protocol, in kitty, Ghostty and WezTerm (not inside tmux, which passes no pictures through). It animates about four times a second, only while someone works or walks.
-- **Elsewhere:** the desktop app shows it as an SVG; any terminal that can't show pictures keeps the text office, unchanged. The mod guesses from the terminal's environment and, if drawing a picture is refused, switches back to text by itself.
-- `/office pixel on|off` sets it for the session; `officeStyle: pixel` in `/config` makes it the default.
+- **Desks:** PR Review, HQ and Sphere Dev on the first row; Social, Daily Dose and Quilt Discussion on the second. Each person has their own look and props: glasses and a diff for PR Review, a hoodie and laptop for Sphere Dev, a ring light for Social, a newspaper and coffee for Daily Dose, a whiteboard for Quilt Discussion, and the boss's tie, in-tray and clock for HQ.
+- **When HQ hands out a task:** that department stands up, walks to HQ, collects the brief (HQ stands and slides it across), carries it back and starts typing.
+- **While a department works:** it walks to the room its session is in. That's the Archives for reading code, the Warehouse for web research, the Workshop for edits and the Server Rm for commands (red flash on a failure). Back at the desk between steps.
+- **When it replies:** it carries a ✓ to HQ's in-tray, and there's confetti.
+- **Life:** breathing, blinking, typing hands, a 4-step walk with easing, coffee steam, monitors, a pulsing ring light, bubbles that pop in, and window light that follows your clock from afternoon to evening lamps.
+- **Under the picture:** a label per desk with its state (`● busy`, `→ on a task`, `✓ replied`, `z idle`, `○ not open`) and what it's on.
 
-All art is original and drawn in code (`hooks/pixel-core.ts`); inspired by [Claude-Office](https://github.com/W17ant/Claude-Office), none of its assets are used.
+**Sharp, not blurry.** The picture is drawn at a whole-number scale into a box of whole terminal cells, so the terminal never stretches it. That needs your cell size in pixels: set `cellPx` in `/config` (default `7x17`). To find yours, run:
+
+```sh
+python3 -c "import fcntl,termios,struct;r,c,x,y=struct.unpack('HHHH',fcntl.ioctl(1,termios.TIOCGWINSZ,b'0'*8));print(f'{x//c}x{y//r}')"
+```
+
+<p align="center"><img src="docs/media/pixel-v2-old-vs-new.png" alt="The same crop: v1 stretched and smoothed by the terminal (left) vs drawn to whole cells (right)" width="640"></p>
+
+**Where it runs:** kitty, Ghostty and WezTerm show the picture inline (not inside tmux, which passes no pictures). It animates about twelve times a second while anyone moves, three when all is still. The desktop app shows it as an image. Other terminals keep the text office. Without departments configured, pixel mode shows the single-session pixel office from 0.10.
+
+**How it knows:** every tab running the mod writes a tiny status file, `~/.claude/agent-office/status/<session>.json`, with the room it's working in. HQ reads the files of the running department sessions every 2 seconds. Dispatches and replies come from what HQ sends and receives.
+
+All art is original and drawn in code (`hooks/pixel2-core.ts`). It's inspired by [Claude-Office](https://github.com/W17ant/Claude-Office) and [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents), but uses none of their assets.
 
 ## Everything else on the pane
 
@@ -236,6 +251,7 @@ Compared with upstream, Agent Office adds:
 | `$.fs.list` / `$.fs.read` / `$.fs.stat` on `~/.claude/sessions/*.json` and `~/.claude/history.jsonl` | the building view, only while it's on screen |
 | `$.ui.toast` | budget and context alerts |
 | `$.env.get` of `TERM`, `TERM_PROGRAM`, `TMUX`, `KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR`, `WEZTERM_EXECUTABLE`; `$.ui.blit` | the pixel office: whether the terminal shows pictures, and its animation |
+| `$.fs.write` of `~/.claude/agent-office/status/<session>.json`; `$.fs.read` of the department sessions' status files | the department office: which room each department is working in |
 | `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
 `claude plugin validate .` prints exactly what it hooks and calls.
@@ -261,6 +277,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | `lightModel` / `heavyModel` | `claude-haiku-4-5` / `claude-opus-5-5` | models for light and heavy prompts |
 | `lightEffort` / `heavyEffort` | `low` / `high` | effort for light and heavy prompts |
 | `officeStyle` | `text` | `pixel` draws the office as pixel art where the terminal shows pictures |
+| `cellPx` | `7x17` | your terminal's cell size in pixels, so the pixel office fills whole cells and stays sharp |
 | `costBudgetUsd` | `5` | session budget for alerts; `0` turns cost alerts off |
 | `costWarnPct` | `50,80,100` | budget percentages that raise a toast |
 | `contextWarnPct` | `70,90` | context-fill percentages that raise a toast |
@@ -285,6 +302,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | --- | --- |
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks, state access, and one function per panel |
 | [`hooks/office-core.ts`](hooks/office-core.ts) | the office as pure data: tool → room, staff names, quips, the scene |
+| [`hooks/pixel2-core.ts`](hooks/pixel2-core.ts), [`hooks/dept-office.ts`](hooks/dept-office.ts), [`hooks/png-core.ts`](hooks/png-core.ts) | the department office: people, rooms and effects; the director that turns dispatches and status files into walks; a compressing PNG encoder |
 | [`hooks/pixel-core.ts`](hooks/pixel-core.ts) | the pixel office: framebuffer, original sprites and furniture, a small PNG encoder, terminal detection |
 | [`hooks/office.tsx`](hooks/office.tsx) | the office drawing, a surface module that animates the hallway on its own frame clock |
 | [`hooks/usage-core.ts`](hooks/usage-core.ts) | the usage log and its report |
