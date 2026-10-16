@@ -57,11 +57,19 @@ export const colorAt = (f: Canvas, x: number, y: number): RGB => {
 }
 
 const GLYPHS: Record<string, readonly string[]> = {
-  A: ['.#.', '#.#', '###', '#.#', '#.#'], C: ['###', '#..', '#..', '#..', '###'], E: ['###', '#..', '###', '#..', '###'],
-  H: ['#.#', '#.#', '###', '#.#', '#.#'], I: ['###', '.#.', '.#.', '.#.', '###'], K: ['#.#', '#.#', '##.', '#.#', '#.#'],
-  M: ['#.#', '###', '###', '#.#', '#.#'], O: ['###', '#.#', '#.#', '#.#', '###'], P: ['###', '#.#', '###', '#..', '#..'],
-  R: ['##.', '#.#', '##.', '#.#', '#.#'], S: ['###', '#..', '###', '..#', '###'], U: ['#.#', '#.#', '#.#', '#.#', '###'],
-  V: ['#.#', '#.#', '#.#', '#.#', '.#.'], W: ['#.#', '#.#', '###', '###', '#.#'], ' ': ['...', '...', '...', '...', '...'],
+  A: ['.#.', '#.#', '###', '#.#', '#.#'], B: ['##.', '#.#', '##.', '#.#', '##.'], C: ['###', '#..', '#..', '#..', '###'],
+  D: ['##.', '#.#', '#.#', '#.#', '##.'], E: ['###', '#..', '###', '#..', '###'], F: ['###', '#..', '###', '#..', '#..'],
+  G: ['###', '#..', '#.#', '#.#', '###'], H: ['#.#', '#.#', '###', '#.#', '#.#'], I: ['###', '.#.', '.#.', '.#.', '###'],
+  J: ['..#', '..#', '..#', '#.#', '###'], K: ['#.#', '#.#', '##.', '#.#', '#.#'], L: ['#..', '#..', '#..', '#..', '###'],
+  M: ['#.#', '###', '###', '#.#', '#.#'], N: ['##.', '#.#', '#.#', '#.#', '#.#'], O: ['###', '#.#', '#.#', '#.#', '###'],
+  P: ['###', '#.#', '###', '#..', '#..'], Q: ['.#.', '#.#', '#.#', '#.#', '.##'], R: ['##.', '#.#', '##.', '#.#', '#.#'],
+  S: ['###', '#..', '###', '..#', '###'], T: ['###', '.#.', '.#.', '.#.', '.#.'], U: ['#.#', '#.#', '#.#', '#.#', '###'],
+  V: ['#.#', '#.#', '#.#', '#.#', '.#.'], W: ['#.#', '#.#', '###', '###', '#.#'], X: ['#.#', '#.#', '.#.', '#.#', '#.#'],
+  Y: ['#.#', '#.#', '.#.', '.#.', '.#.'], Z: ['###', '..#', '.#.', '#..', '###'], '0': ['###', '#.#', '#.#', '#.#', '###'],
+  '1': ['.#.', '##.', '.#.', '.#.', '###'], '2': ['##.', '..#', '.#.', '#..', '###'], '3': ['##.', '..#', '.#.', '..#', '##.'],
+  '4': ['#.#', '#.#', '###', '..#', '..#'], '5': ['###', '#..', '##.', '..#', '##.'], '6': ['.##', '#..', '###', '#.#', '###'],
+  '7': ['###', '..#', '.#.', '.#.', '.#.'], '8': ['###', '#.#', '###', '#.#', '###'], '9': ['###', '#.#', '###', '..#', '##.'],
+  '-': ['...', '...', '###', '...', '...'], ' ': ['...', '...', '...', '...', '...'],
 }
 const SIGN = (f: Canvas, cx: number, y: number, text: string, c: RGB) => {
   let x = cx - Math.floor((text.length * 4 - 1) / 2)
@@ -195,9 +203,35 @@ export type RoomZone = (typeof ROOM_ZONES)[number]
 const ROOM_NAMES: Record<RoomZone, string> = { archives: 'Archives', warehouse: 'Warehouse', server: 'Server Rm', workshop: 'Workshop' }
 const ROOM_ACCENT: Record<RoomZone, RGB> = { archives: hex(0xcdb4db), warehouse: hex(0xf4a261), server: hex(0x90be6d), workshop: hex(0xf9844a) }
 
+/**
+ * The office's width in art pixels, and how it splits: three desk columns and four rooms. The pane's
+ * spare width goes into wider desks and rooms; what's drawn inside each stays centred.
+ */
+export type Layout = { aw: number; cubX: number[]; cubW: number[]; roomX: number[]; roomW: number[] }
+export const layoutFor = (aw: number): Layout => {
+  const w = Math.max(AW, Math.floor(aw))
+  const cub = Math.floor(w / 3)
+  const room = Math.floor(w / 4)
+  return { aw: w, cubX: [0, cub, cub * 2], cubW: [cub, cub, w - cub * 2], roomX: [0, room, room * 2, room * 3], roomW: [room, room, room, w - room * 3] }
+}
+let LAY = layoutFor(AW)
+/** The layout the office draws and walks with; set before drawing when the pane changes width. */
+export const setLayout = (aw: number) => {
+  if (LAY.aw !== Math.max(AW, Math.floor(aw))) LAY = layoutFor(aw)
+  return LAY
+}
+
 /** Desk slots: 0 1 2 on the first row (1 is HQ), 3 4 5 on the second. */
 export const HQ_SLOT = 1
-export const slotOrigin = (slot: number) => ({ x: (slot % 3) * CUB, y: slot < 3 ? ROW1 : ROW2 })
+/** A desk's whole cell (walls, floor, name plate). */
+export const slotFrame = (slot: number) => ({ x: LAY.cubX[slot % 3]!, w: LAY.cubW[slot % 3]!, y: slot < 3 ? ROW1 : ROW2 })
+/** Where a desk's furniture starts: centred in its cell. */
+export const slotOrigin = (slot: number) => {
+  const fr = slotFrame(slot)
+  return { x: fr.x + Math.floor((fr.w - CUB) / 2), y: fr.y }
+}
+const roomFrame = (n: number) => ({ x: LAY.roomX[n]!, w: LAY.roomW[n]! })
+const roomInset = (n: number) => roomFrame(n).x + Math.floor((roomFrame(n).w - 42) / 2)
 
 export type Place = { kind: 'desk'; slot: number } | { kind: 'hq' } | { kind: 'room'; zone: RoomZone }
 type Pt = readonly [number, number]
@@ -212,8 +246,8 @@ const hqStand = (): Pt => {
   const o = slotOrigin(HQ_SLOT)
   return [o.x + 40, o.y + 6]
 }
-const roomDoor = (z: RoomZone): Pt => [ROOM_ZONES.indexOf(z) * 42 + 15, COR1]
-const roomSpot = (z: RoomZone): Pt => [ROOM_ZONES.indexOf(z) * 42 + 15, 14]
+const roomDoor = (z: RoomZone): Pt => [roomInset(ROOM_ZONES.indexOf(z)) + 15, COR1]
+const roomSpot = (z: RoomZone): Pt => [roomInset(ROOM_ZONES.indexOf(z)) + 15, 14]
 
 /** The way from one place to another along the corridors, as corner points. */
 export const pathBetween = (a: Place, b: Place): Pt[] => {
@@ -328,7 +362,7 @@ export const walkerOf = (a: Actor, now: number): Walker | null => {
 
 export type DeskState = 'closed' | 'idle' | 'busy'
 export type BubbleKind = 'busy' | 'idle' | 'reply' | 'sent' | 'alert'
-export type Desk = { slot: number; look: Look; state: DeskState; bubble: BubbleKind | null; bubbleSince: number; paper: boolean }
+export type Desk = { slot: number; look: Look; label: string; state: DeskState; bubble: BubbleKind | null; bubbleSince: number; paper: boolean }
 export type RoomFx = { zone: RoomZone; since: number; flash?: 'fail' | 'pass' }
 export type Scene = {
   desks: Desk[]
@@ -355,7 +389,7 @@ const bubble = (f: Canvas, x: number, y: number, kind: BubbleKind, ageFrames: nu
   R(f, x, y, 9, 7, C.white)
   P(f, x + 1, y + 7, C.white)
   P(f, x, y + 8, C.white)
-  if (kind === 'busy') [2, 4, 6].forEach((dx, k) => Math.floor(tick / 3) % 4 > k && P(f, x + dx, y + 3, C.black))
+  if (kind === 'busy') [2, 4, 6].forEach((dx, k) => Math.floor(tick / 3) % 3 >= k && P(f, x + dx, y + 3, C.black))
   if (kind === 'idle') SPR(f, x + 2, y + 1, ['zzzz', '...z', '..z.', '.z..', 'zzzz'], { z: C.navy })
   if (kind === 'reply') SPR(f, x + 1, y + 1, ['......g', '.....gg', 'g...gg.', 'gg.gg..', '.ggg...'], { g: C.check })
   if (kind === 'sent') {
@@ -368,6 +402,43 @@ const bubble = (f: Canvas, x: number, y: number, kind: BubbleKind, ageFrames: nu
   }
 }
 
+const PLATE: Record<Look, RGB> = { hq: C.amber, pr: C.teal, sphere: C.purple, social: C.pink, daily: C.green, quilt: C.orange }
+
+/** A name as fits `chars` letters: whole words first, then cut. `Quilt Discussion` → `QUILT DISC`. */
+export const plateName = (label: string, chars: number) => {
+  const up = label.toUpperCase().replace(/[^A-Z0-9 -]/g, '').replace(/\s+/g, ' ').trim()
+  if (up.length <= chars) return up
+  const words = up.split(' ')
+  let out = words[0] ?? ''
+  for (const w of words.slice(1)) {
+    const next = `${out} ${w}`
+    if (next.length <= chars) out = next
+    else {
+      if (out.length + 3 <= chars) out = `${out} ${w.slice(0, Math.min(4, chars - out.length - 1))}`
+      break
+    }
+  }
+  return out.slice(0, chars)
+}
+
+/** The desk's name plate along its bottom edge: its name, and its state at the right. */
+const plate = (f: Canvas, fr: { x: number; w: number }, y: number, d: Desk, tick: number) => {
+  const closed = d.state === 'closed'
+  const bg = closed ? C.metalD : PLATE[d.look]
+  R(f, fr.x + 1, y, fr.w - 2, 7, bg)
+  const iconW = 7
+  const chars = Math.max(2, Math.floor((fr.w - 2 - iconW - 4) / 4))
+  const name = plateName(d.label, chars)
+  const textW = name.length * 4 - 1
+  SIGN(f, fr.x + 2 + Math.floor((fr.w - 4 - iconW - textW) / 2) + Math.floor(textW / 2), y + 1, name, closed ? C.grey : C.black)
+  const ix = fr.x + fr.w - 2 - iconW
+  if (closed) return
+  if (d.bubble === 'busy' || (d.state === 'busy' && !d.bubble)) R(f, ix + 1, y + 2, 3, 3, Math.floor(tick / 6) % 2 ? C.white : C.black)
+  else if (d.bubble === 'sent') SPR(f, ix, y + 1, ['aaaaa', 'kakak', 'aakaa', 'aaaaa'], { a: C.white, k: C.black })
+  else if (d.bubble === 'reply') SPR(f, ix, y + 1, ['....k', '...kk', 'k.kk.', '.kk..'], { k: C.black })
+  else SPR(f, ix, y + 1, ['kkk', '..k', '.k.', 'kkk'], { k: C.black })
+}
+
 const CONFETTI: readonly (readonly [number, number, RGB])[] = Array.from({ length: 26 }, (_, i) => {
   const a = Math.sin(i * 12.9898) * 43758.5453
   const b = Math.sin(i * 78.233) * 12345.678
@@ -378,26 +449,28 @@ const CONFETTI: readonly (readonly [number, number, RGB])[] = Array.from({ lengt
 
 /** One frame of the office, 168×153 art pixels. `tick` counts frames (about 12 a second); `now` is ms. */
 export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
-  const f = newCanvas()
+  const AWL = LAY.aw
+  const f = newCanvas(AWL, AH)
   const e = sc.evening
   const win = e < 0.8 ? mix(hex(0x7cc4e8), hex(0xf2a65a), e * 1.4) : mix(hex(0xf2a65a), hex(0x3a3566), (e - 0.8) / 0.2)
   const floor = mix(C.floor, hex(0x3e3a4a), e * 0.6)
   const floorB = mix(C.floorB, hex(0x38344a), e * 0.6)
-  R(f, 0, 0, AW, AH, floor)
+  R(f, 0, 0, AWL, AH, floor)
   for (const y0 of [COR1, 89]) {
-    R(f, 0, y0, AW, 16, mix(C.hall, hex(0x26232e), e * 0.5))
-    for (let i = 0; i < AW; i += 8) R(f, i + ((i / 8) % 2 ? 4 : 0), y0 + 7, 2, 2, C.tile)
+    R(f, 0, y0, AWL, 16, mix(C.hall, hex(0x26232e), e * 0.5))
+    for (let i = 0; i < AWL; i += 8) R(f, i + ((i / 8) % 2 ? 4 : 0), y0 + 7, 2, 2, C.tile)
   }
   // shared rooms
   ROOM_ZONES.forEach((z, n) => {
-    const x = n * 42
+    const fr = roomFrame(n)
+    const x = roomInset(n)
     const fx = sc.rooms.find(r => r.zone === z)
     let rf = z === 'warehouse' ? hex(0x4d4a40) : hex(0x4a4f5c)
     if (fx?.flash && Math.floor(tick / 2) % 2 === 0) rf = mix(rf, fx.flash === 'fail' ? C.red : C.green, 0.45)
-    R(f, x, 0, 42, ROOM_H, C.wall)
-    R(f, x + 1, 8, 40, ROOM_H - 9, mix(rf, hex(0x3a3646), e * 0.5))
-    R(f, x + 1, 1, 40, 7, ROOM_ACCENT[z])
-    SIGN(f, x + 21, 2, ROOM_NAMES[z], C.black)
+    R(f, fr.x, 0, fr.w, ROOM_H, C.wall)
+    R(f, fr.x + 1, 8, fr.w - 2, ROOM_H - 9, mix(rf, hex(0x3a3646), e * 0.5))
+    R(f, fr.x + 1, 1, fr.w - 2, 7, ROOM_ACCENT[z])
+    SIGN(f, fr.x + Math.floor(fr.w / 2), 2, ROOM_NAMES[z], C.black)
     R(f, x + 16, ROOM_H - 1, 10, 1, C.hall)
     const age = fx ? Math.max(0, (now - fx.since) / 1000) : 0
     if (z === 'archives')
@@ -453,13 +526,14 @@ export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
   // desks
   for (const d of sc.desks) {
     const { x, y } = slotOrigin(d.slot)
+    const fr = slotFrame(d.slot)
     const isHQ = d.slot === HQ_SLOT
-    R(f, x, y, CUB, 40, floor)
-    for (let yy = y + 8; yy < y + 40; yy += 8) for (let xx = x + (Math.floor(yy / 8) % 2) * 8; xx < x + CUB; xx += 16) R(f, xx, yy, 8, 8, floorB)
-    R(f, x, y, 1, 40, C.wall)
-    R(f, x + CUB - 1, y, 1, 40, C.wall)
-    R(f, x, y, 20, 2, C.wall)
-    R(f, x + 36, y, 20, 2, C.wall)
+    R(f, fr.x, y, fr.w, 40, floor)
+    for (let yy = y + 8; yy < y + 33; yy += 8) for (let xx = fr.x + (Math.floor(yy / 8) % 2) * 8; xx < fr.x + fr.w; xx += 16) R(f, xx, yy, 8, Math.min(8, y + 33 - yy), floorB)
+    R(f, fr.x, y, 1, 40, C.wall)
+    R(f, fr.x + fr.w - 1, y, 1, 40, C.wall)
+    R(f, fr.x, y, x + 20 - fr.x, 2, C.wall)
+    R(f, x + 36, y, fr.x + fr.w - (x + 36), 2, C.wall)
     if (!isHQ) {
       R(f, x + 4, y + 3, 12, 4, C.windowF)
       R(f, x + 5, y + 4, 10, 2, win)
@@ -479,8 +553,8 @@ export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
     const dw = isHQ ? 44 : 36
     R(f, dx, y + 21, dw, 5, C.wood)
     R(f, dx, y + 21, dw, 1, C.woodL)
-    R(f, dx + 1, y + 26, 2, 8, C.woodD)
-    R(f, dx + dw - 3, y + 26, 2, 8, C.woodD)
+    R(f, dx + 1, y + 26, 2, 6, C.woodD)
+    R(f, dx + dw - 3, y + 26, 2, 6, C.woodD)
     if (e > 0.65 && !closed) {
       R(f, dx + dw - 8, y + 17, 3, 4, C.metalD)
       R(f, dx + dw - 9, y + 16, 5, 2, C.lamp)
@@ -549,17 +623,18 @@ export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
         break
     }
     if (closed) {
-      R(f, x + 44, y + 26, 5, 8, C.woodD)
-      R(f, x + 43, y + 21, 7, 6, C.plant)
+      R(f, x + 44, y + 25, 5, 7, C.woodD)
+      R(f, x + 43, y + 20, 7, 6, C.plant)
     }
+    plate(f, fr, y + 33, d, tick)
     if (d.paper && !away) {
       R(f, x + 12, y + 17, 6, 4, C.paper)
       R(f, x + 13, y + 18, 4, 1, C.grey)
     }
     if (d.bubble && !away && !closed) bubble(f, x + 35, y + 3, d.bubble, Math.floor((now - d.bubbleSince) / 83), tick)
   }
-  R(f, 0, ROW2 + 40, AW, AH - ROW2 - 40, C.wall)
-  for (let px = 8; px < AW; px += 28) R(f, px, ROW2 + 42, 5, 4, C.plant)
+  R(f, 0, ROW2 + 40, AWL, AH - ROW2 - 40, C.wall)
+  for (let px = 8; px < AWL; px += 28) R(f, px, ROW2 + 42, 5, 4, C.plant)
   for (const w of sc.walkers) drawWalker(f, w.look, w.x, w.y, w.facing, w.frame, w.carry, tick % 40 < 2)
   if (sc.confettiSince !== null) {
     const n = (now - sc.confettiSince) / 83
@@ -575,14 +650,17 @@ export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
 // ---------------------------------------------------------------- sizing for sharp pixels
 
 /**
- * The picture's size for a pane `columns` wide with cells `cellW × cellH` px: the largest whole-number
- * scale whose art fits, and a box of whole cells holding it, so the terminal never resamples.
+ * The picture for a pane `columns` wide with cells `cellW × cellH` px: it spans every column. The
+ * scale is the largest whole number that fits the minimum office (and keeps it under `maxRows`);
+ * the art is then made as wide as the pane allows at that scale, so no strip is left empty.
  */
-export const pixelBox = (columns: number, cellW: number, cellH: number) => {
-  const scale = Math.max(1, Math.floor((columns * cellW) / AW))
-  const cols = Math.ceil((AW * scale) / cellW)
+export const pixelBox = (columns: number, cellW: number, cellH: number, maxRows = 34) => {
+  const width = Math.max(1, columns) * cellW
+  let scale = Math.max(1, Math.floor(width / AW))
+  while (scale > 1 && Math.ceil((AH * scale) / cellH) > maxRows) scale -= 1
+  const aw = Math.max(AW, Math.floor(width / scale))
   const rows = Math.ceil((AH * scale) / cellH)
-  return { scale, cols, rows, width: cols * cellW, height: rows * cellH }
+  return { scale, aw, cols: Math.max(1, columns), rows, width: Math.max(width, aw * scale), height: rows * cellH }
 }
 
 /** The art scaled up by whole pixels (no smoothing), centred on a background box `width × height`. */

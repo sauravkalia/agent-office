@@ -65,9 +65,9 @@ Each worker keeps the same name for the session and mutters something about the 
 - **While a department works:** it walks to the room its session is in. That's the Archives for reading code, the Warehouse for web research, the Workshop for edits and the Server Rm for commands (red flash on a failure). Back at the desk between steps.
 - **When it replies:** it carries a ✓ to HQ's in-tray, and there's confetti.
 - **Life:** breathing, blinking, typing hands, a 4-step walk with easing, coffee steam, monitors, a pulsing ring light, bubbles that pop in, and window light that follows your clock from afternoon to evening lamps.
-- **Under the picture:** a label per desk with its state (`● busy`, `→ on a task`, `✓ replied`, `z idle`, `○ not open`) and what it's on.
+- **Name plates:** each desk has its department's name on a coloured plate in the picture, with its state at the right end: ■ busy, ✉ task out, ✓ replied, z idle. A grey plate means the tab isn't open. Under the picture, one line lists what's in flight (`→ Sphere Dev: fix RadarChart   ✓ Social: 3 captions ready`).
 
-**Sharp, not blurry.** The picture is drawn at a whole-number scale into a box of whole terminal cells, so the terminal never stretches it. That needs your cell size in pixels: set `cellPx` in `/config` (default `7x17`). To find yours, run:
+**Sharp and full width.** The picture spans every column of the pane. It's drawn at the largest whole-number scale that fits, and the spare width goes into wider desks and rooms, so the terminal never stretches it and no strip is left empty. It's redrawn to the new size when you resize the pane. That needs your cell size in pixels, which the mod measures itself (`cellPx: auto`) with one short `python3` call that reads the terminal's window size. If measuring doesn't work where you run Claude Code, set `cellPx` to `WxH` in `/config`. To find it, run:
 
 ```sh
 python3 -c "import fcntl,termios,struct;r,c,x,y=struct.unpack('HHHH',fcntl.ioctl(1,termios.TIOCGWINSZ,b'0'*8));print(f'{x//c}x{y//r}')"
@@ -251,6 +251,7 @@ Compared with upstream, Agent Office adds:
 | `$.fs.list` / `$.fs.read` / `$.fs.stat` on `~/.claude/sessions/*.json` and `~/.claude/history.jsonl` | the building view, only while it's on screen |
 | `$.ui.toast` | budget and context alerts |
 | `$.env.get` of `TERM`, `TERM_PROGRAM`, `TMUX`, `KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR`, `WEZTERM_EXECUTABLE`; `$.ui.blit` | the pixel office: whether the terminal shows pictures, and its animation |
+| `$.process.run` of `python3 -c …` (reads the terminal's window size, nothing else) | the pixel office: your cell size in pixels, so it fills the pane sharply |
 | `$.fs.write` of `~/.claude/agent-office/status/<session>.json`; `$.fs.read` of the department sessions' status files | the department office: which room each department is working in |
 | `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
@@ -277,7 +278,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | `lightModel` / `heavyModel` | `claude-haiku-4-5` / `claude-opus-5-5` | models for light and heavy prompts |
 | `lightEffort` / `heavyEffort` | `low` / `high` | effort for light and heavy prompts |
 | `officeStyle` | `text` | `pixel` draws the office as pixel art where the terminal shows pictures |
-| `cellPx` | `7x17` | your terminal's cell size in pixels, so the pixel office fills whole cells and stays sharp |
+| `cellPx` | `auto` | your terminal's cell size in pixels; `auto` measures it, so the pixel office fills the pane and stays sharp |
 | `costBudgetUsd` | `5` | session budget for alerts; `0` turns cost alerts off |
 | `costWarnPct` | `50,80,100` | budget percentages that raise a toast |
 | `contextWarnPct` | `70,90` | context-fill percentages that raise a toast |

@@ -64,10 +64,10 @@ import {
 import type { Config, Panel } from './core'
 import { base64, drawOffice, encodePng, rowsFor, termShowsImages } from './pixel-core'
 import type { Walk } from './pixel-core'
-import { parseStatus } from './status-core'
+import { cellFromWinsize, parseStatus } from './status-core'
 import { direct, newDirector } from './dept-office'
 import type { DeptInput, SlotInfo } from './dept-office'
-import { AW as ART_W, AH as ART_H, HQ_SLOT, ROOM_ZONES, drawScene, lookOf, parseCell, pixelBox, scaleInto } from './pixel2-core'
+import { AW as ART_W, AH as ART_H, HQ_SLOT, ROOM_ZONES, drawScene, lookOf, parseCell, pixelBox, scaleInto, setLayout } from './pixel2-core'
 import type { RoomZone } from './pixel2-core'
 import { encodePngRgb } from './png-core'
 import { answerDispatch, crossMessageOf, deptOfSession, desksOf, rosterText } from './departments-core'
@@ -381,6 +381,22 @@ async function writeStatus($: EngineInterface, zone: string, text: string, isErr
   await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now }))
 }
 
+/**
+ * The terminal's cell size in pixels, from the window size its tty reports (kitty, Ghostty and
+ * WezTerm fill in the pixel fields). One short python3 call; anything unexpected keeps the old value.
+ */
+const CELL_PROBE = [
+  'import fcntl, termios, struct',
+  'with open("/dev/tty") as t:',
+  '    r, c, x, y = struct.unpack("HHHH", fcntl.ioctl(t, termios.TIOCGWINSZ, b"0" * 8))',
+  'print(r, c, x, y)',
+].join('\n')
+async function measureCell($: EngineInterface) {
+  const r = await $.process.run(['python3', '-c', CELL_PROBE])
+  const cell = cellFromWinsize(r.exitCode === 0 ? r.stdout : '')
+  if (cell) await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: x?.denied ?? false, cell }))
+}
+
 /** `/office route [auto|off|light|standard|heavy]`: show or set the supervisor. */
 async function routeText($: EngineInterface, cfg: Config, arg: string) {
   const modes = ['auto', 'off', 'light', 'standard', 'heavy'] as const
@@ -491,9 +507,14 @@ export const register: Register = (on, options) => {
   }
   // The department office (pixel mode with departments): its director keeps the actors between frames.
   const director = newDirector()
-  const cell = parseCell(cfg.cellPx)
-  let shownDept: { input: DeptInput; scale: number; cols: number; rows: number; width: number; height: number } | null = null
-  const deptFrame = (input: DeptInput, now: number, box: { scale: number; width: number; height: number }) => {
+  // The cell size: measured from the terminal (auto), or the one set in /config. Until a measurement
+  // lands, assume a large Retina cell: the terminal then shrinks the picture rather than leave a gap.
+  const cellSet = cfg.cellPx.trim().toLowerCase() === 'auto' ? null : parseCell(cfg.cellPx)
+  const FALLBACK_CELL = { w: 16, h: 34 }
+  let lastCols = 0
+  let shownDept: { input: DeptInput; scale: number; aw: number; cols: number; rows: number; width: number; height: number } | null = null
+  const deptFrame = (input: DeptInput, now: number, box: { scale: number; aw: number; width: number; height: number }) => {
+    setLayout(box.aw)
     const { scene, moving } = direct(director, input, now)
     const art = drawScene(scene, Math.floor(now / 83), now)
     return { png: base64(encodePngRgb(box.width, box.height, scaleInto(art, box.scale, box.width, box.height))), moving }
@@ -524,7 +545,8 @@ export const register: Register = (on, options) => {
       $.env.get('WEZTERM_EXECUTABLE'),
     ])
     const images = termShowsImages({ TERM, TERM_PROGRAM, TMUX, KITTY_WINDOW_ID, GHOSTTY_RESOURCES_DIR, WEZTERM_EXECUTABLE })
-    await update($, pixelEnv, x => ({ images, denied: x?.denied ?? false }))
+    await update($, pixelEnv, x => ({ images, denied: x?.denied ?? false, cell: x?.cell ?? null }))
+    if (images && !cellSet) void measureCell($).catch(() => undefined)
     // While the pixel office is up and something moves, swap in a fresh frame about four times a second.
     $.clock.every(250, async () => {
       if (!shown || !shown.people.some(p => p.mood === 'ok' || walking.has(p.id))) return
@@ -1174,41 +1196,18 @@ export const register: Register = (on, options) => {
       const t = new Date(now)
       return { slots, hour: t.getHours(), minute: t.getMinutes() }
     }
-    const ROOM_LABEL: Record<RoomZone, string> = { archives: 'Archives', warehouse: 'Warehouse', server: 'Server Rm', workshop: 'Workshop' }
-    const deptLabels = (input: DeptInput, cols: number) => {
-      const colW = Math.max(12, Math.floor(cols / 3))
-      const bySlot = new Map(input.slots.map(s => [s.slot, s]))
-      const cellFor = (slot: number) => {
-        const s = bySlot.get(slot)
-        if (!s) return [{ text: '', color: C.faint }, { text: '', color: C.faint }]
-        const d = s.dispatch
-        const fresh = d?.status === 'replied' && now - (d.endedAt ?? d.at) < 15 * 60_000
-        const st = s.state === 'closed' ? '○ not open' : d?.status === 'sent' ? '→ on a task' : fresh ? '✓ replied' : s.state === 'busy' ? '● busy' : 'z idle'
-        const color = s.state === 'closed' ? C.faint : d?.status === 'sent' ? C.amber : fresh ? C.gate : s.state === 'busy' ? (s.slot === HQ_SLOT ? C.main : C.agent) : C.dim
-        const line2 = s.state === 'closed' ? 'open its tab to staff' : d?.status === 'sent' ? `→ ${d.task}` : fresh ? `✓ ${d.reply ?? ''}` : s.zone ? `${ROOM_LABEL[s.zone]}` : s.state === 'busy' ? 'at the desk' : ''
-        return [
-          { text: shorten(`${s.label}  ${st}`, colW - 1), color },
-          { text: shorten(line2, colW - 1), color: C.dim },
-        ]
-      }
-      return [[0, 1, 2], [3, 4, 5]].map(row => (
-        <Box flexDirection="column">
-          {[0, 1].map(line => (
-            <Box>
-              {row.map(slot => {
-                const c = cellFor(slot)[line]!
-                return (
-                  <Box width={colW}>
-                    <Text color={c.color} bold={line === 0} wrap="truncate">
-                      {c.text}
-                    </Text>
-                  </Box>
-                )
-              })}
-            </Box>
+    // Names and states are on the desks' own plates; under the picture, only what's in flight.
+    const deptTicker = (input: DeptInput, w: number) => {
+      const items = input.slots
+        .filter(s => s.dispatch && (s.dispatch.status === 'sent' || now - (s.dispatch.endedAt ?? s.dispatch.at) < 15 * 60_000))
+        .map(s => ({ text: s.dispatch!.status === 'sent' ? `→ ${s.label}: ${s.dispatch!.task}` : `✓ ${s.label}: ${s.dispatch!.reply ?? 'replied'}`, color: s.dispatch!.status === 'sent' ? C.amber : C.gate }))
+      return items.length === 0 ? null : (
+        <Text wrap="truncate">
+          {items.map((it, i) => (
+            <Text color={it.color}>{`${i > 0 ? '   ' : ''}${shorten(it.text, Math.max(20, Math.floor(w / items.length) - 3))}`}</Text>
           ))}
-        </Box>
-      ))
+        </Text>
+      )
     }
     const deptFloor = (w: number) => {
       const input = deptInput()
@@ -1217,24 +1216,29 @@ export const register: Register = (on, options) => {
           shownDept = null
           return null
         }
+        const cell = cellSet ?? pxEnv.cell ?? FALLBACK_CELL
+        if (!cellSet && lastCols !== w) {
+          lastCols = w
+          void measureCell($).catch(() => undefined)
+        }
         const box = pixelBox(w, cell.w, cell.h)
         shownDept = { input, ...box }
         const { Image } = els
         return (
           <Box flexDirection="column" width={w}>
             <Image key="office-dept" source={{ png: deptFrame(input, now, box).png }} columns={box.cols} rows={box.rows} alt={input.slots.map(s => `${s.label} ${s.state}`).join(' · ')} />
-            {deptLabels(input, box.cols)}
+            {deptTicker(input, w)}
           </Box>
         )
       }
       shownDept = null
       if (!('Svg' in els)) return null
       const { Svg } = els
-      const png = deptFrame(input, now, { scale: 2, width: ART_W * 2, height: ART_H * 2 }).png
+      const png = deptFrame(input, now, { scale: 2, aw: ART_W, width: ART_W * 2, height: ART_H * 2 }).png
       return (
         <Box flexDirection="column" width={w}>
           <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${ART_W * 3}" height="${ART_H * 3}" viewBox="0 0 ${ART_W * 2} ${ART_H * 2}"><image href="data:image/png;base64,${png}" width="${ART_W * 2}" height="${ART_H * 2}" style="image-rendering:pixelated"/></svg>`} alt="department office" width={ART_W * 3} height={ART_H * 3} />
-          {deptLabels(input, 72)}
+          {deptTicker(input, w)}
         </Box>
       )
     }

@@ -157,26 +157,25 @@ const deptSetup = (on: On, zone: string) => {
   on('fs.write', () => ({ value: undefined }))
 }
 
-test('the department office: one sharp picture of whole cells, a label per desk', { options: { departments: DEPTS, cellPx: '7x17' } }, async ($, on) => {
+test('the department office spans the whole pane; names live on the desks, not in a block below', { options: { departments: DEPTS, cellPx: '7x17' } }, async ($, on) => {
   deptSetup(on, 'warehouse')
   await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
   await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
-  const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
-  const img = await ui.find({ type: 'Image', key: 'office-dept' })
-  expect(img?.props).toMatchObject({ columns: 72, rows: 27 })
-  expect(String((img?.props as { source?: { png?: string } })?.source?.png ?? '').startsWith('iVBORw0KGgo')).toBe(true)
-  expect(await ui.find({ text: /^PR Review z idle/ })).toBeDefined()
-  expect(await ui.find({ text: /^HQ z idle/ })).toBeDefined()
-  expect(await ui.find({ text: /^Sphere Dev ● busy/ })).toBeDefined()
-  expect(await ui.find({ text: /^Warehouse$/ })).toBeDefined()
-  expect(await ui.find({ text: /^Social ○ not open/ })).toBeDefined()
-  // The picture is the org chart here; the text one isn't repeated above it.
-  expect(await ui.find({ text: /HQ supervisor/ })).toBeUndefined()
-  await ui.unmount()
+  for (const cols of [48, 74, 90]) {
+    const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: cols } })
+    const img = await ui.find({ type: 'Image', key: 'office-dept' })
+    expect((img?.props as { columns?: number })?.columns).toBe(cols)
+    expect(String((img?.props as { source?: { png?: string } })?.source?.png ?? '').startsWith('iVBORw0KGgo')).toBe(true)
+    // No detached label rows: each desk carries its own plate in the picture.
+    expect(await ui.find({ text: /^PR Review z idle/ })).toBeUndefined()
+    // The picture is the org chart here; the text one isn't repeated above it.
+    expect(await ui.find({ text: /HQ supervisor/ })).toBeUndefined()
+    await ui.unmount()
+  }
 })
 
-test('a task HQ sends shows on the desk as on its way', { options: { departments: DEPTS } }, async ($, on) => {
+test('a task HQ sends shows in the line under the office while it is out', { options: { departments: DEPTS } }, async ($, on) => {
   deptSetup(on, 'desk')
   await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
@@ -184,7 +183,6 @@ test('a task HQ sends shows on the desk as on its way', { options: { departments
   await $.turn.start({ text: 'fix it', turnId: 'D1' })
   await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: fix RadarChart' } as never)
   const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
-  expect(await ui.find({ text: /^Sphere Dev → on a task/ })).toBeDefined()
-  expect(await ui.find({ text: /^→ fix RadarChart/ })).toBeDefined()
+  expect(await ui.find({ text: /→ Sphere Dev: fix RadarChart/ })).toBeDefined()
   await ui.unmount()
 })

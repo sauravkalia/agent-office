@@ -25,7 +25,7 @@ import {
 import type { Desk, Scene } from '../hooks/pixel2-core'
 
 const desks = (): Desk[] =>
-  (['pr', 'hq', 'sphere', 'social', 'daily', 'quilt'] as const).map((look, slot) => ({ slot, look, state: slot === 5 ? 'closed' : 'busy', bubble: null, bubbleSince: 0, paper: false }))
+  (['pr', 'hq', 'sphere', 'social', 'daily', 'quilt'] as const).map((look, slot) => ({ slot, look, label: look.toUpperCase(), state: slot === 5 ? 'closed' : 'busy', bubble: null, bubbleSince: 0, paper: false }))
 const scene = (over: Partial<Scene> = {}): Scene => ({
   desks: desks(),
   walkers: [],
@@ -45,7 +45,7 @@ test('department names map to their people', () => {
 })
 
 test('the picture fits whole cells, so the terminal never resamples it', () => {
-  expect(pixelBox(72, 7, 17)).toEqual({ scale: 3, cols: 72, rows: 27, width: 504, height: 459 })
+  expect(pixelBox(72, 7, 17)).toEqual({ scale: 3, aw: 168, cols: 72, rows: 27, width: 504, height: 459 })
   const b = pixelBox(100, 8, 18)
   expect(b.scale).toBe(4)
   expect(b.width % 8).toBe(0)
@@ -70,7 +70,7 @@ test('rooms carry their signs; the evening dims the floor and lights the lamps',
   const day = drawScene(scene(), 0, 0)
   const eve = drawScene(scene({ evening: 1 }), 0, 0)
   expect([...colorAt(day, 1, 1)]).toEqual([0xcd, 0xb4, 0xdb])
-  expect(colorAt(day, 50, 86).join()).not.toBe(colorAt(eve, 50, 86).join())
+  expect(colorAt(day, 50, 75).join()).not.toBe(colorAt(eve, 50, 75).join())
   expect([eveningOf(10), eveningOf(17), eveningOf(20), eveningOf(3)]).toEqual([0, 0.5, 1, 1])
 })
 
@@ -143,4 +143,56 @@ test('the director sends a busy department to the room its status names, and hom
   const home = direct(d, { slots: slots({ zone: null }), hour: 10, minute: 0 }, 40_000)
   expect(home.scene.away.has(2)).toBe(false)
   expect(home.scene.rooms).toEqual([])
+})
+
+// ---------------------------------------------------------------- filling the pane
+
+import { layoutFor, plateName, setLayout, slotFrame } from '../hooks/pixel2-core'
+import { cellFromWinsize } from '../hooks/status-core'
+
+test('at any pane width the office fills it: whole-number scale, no strip left on the right', () => {
+  for (const cell of [{ w: 7, h: 17 }, { w: 16, h: 32 }, { w: 10, h: 22 }, { w: 18, h: 38 }]) {
+    for (const cols of [48, 60, 74, 90, 120]) {
+      const b = pixelBox(cols, cell.w, cell.h)
+      expect(Number.isInteger(b.scale)).toBe(true)
+      expect(b.cols).toBe(cols)
+      expect(b.width).toBe(cols * cell.w)
+      // what the art can't use is less than one art pixel
+      expect(b.width - b.aw * b.scale).toBeLessThan(b.scale)
+      expect(b.aw).toBeGreaterThanOrEqual(AW)
+      expect(b.rows).toBeLessThanOrEqual(34)
+    }
+  }
+})
+
+test('desks share the width evenly, so each desk sits over a third of the columns', () => {
+  for (const aw of [168, 201, 254, 300]) {
+    const L = layoutFor(aw)
+    expect(L.cubW.reduce((a, b) => a + b)).toBe(aw)
+    expect(L.roomW.reduce((a, b) => a + b)).toBe(aw)
+    expect(Math.max(...L.cubW) - Math.min(...L.cubW)).toBeLessThanOrEqual(2)
+  }
+  setLayout(254)
+  expect(slotFrame(2)).toEqual({ x: 168, w: 86, y: 49 })
+  setLayout(AW)
+})
+
+test('a wider office draws wider, and keeps every desk plate and room sign', () => {
+  setLayout(254)
+  const f = drawScene(scene(), 0, 0)
+  expect([f.w, f.h]).toEqual([254, AH])
+  setLayout(AW)
+})
+
+test('names fit their plates: whole words first', () => {
+  expect(plateName('Quilt Discussion', 10)).toBe('QUILT DISC')
+  expect(plateName('Sphere Dev', 10)).toBe('SPHERE DEV')
+  expect(plateName('PR Review', 12)).toBe('PR REVIEW')
+  expect(plateName('Daily Dose', 6)).toBe('DAILY')
+})
+
+test('the cell size comes from the terminal window size', () => {
+  expect(cellFromWinsize('40 150 2400 1280\n')).toEqual({ w: 16, h: 32 })
+  expect(cellFromWinsize('50 74 0 0')).toBe(null)
+  expect(cellFromWinsize('ERR')).toBe(null)
 })

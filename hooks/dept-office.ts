@@ -90,7 +90,7 @@ export const direct = (d: Director, input: DeptInput, now: number): { scene: Sce
     const b = d.bubbles.get(s.slot)
     if (!b || b.kind !== kind) d.bubbles.set(s.slot, { kind, since: now })
     const paper = s.dispatch?.status === 'sent' && d.briefDone.get(s.slot) === `${s.dispatch.at}`
-    return { slot: s.slot, look: s.look, state: s.state, bubble: kind, bubbleSince: d.bubbles.get(s.slot)!.since, paper }
+    return { slot: s.slot, look: s.look, label: s.label, state: s.state, bubble: kind, bubbleSince: d.bubbles.get(s.slot)!.since, paper }
   })
   if (tray === false && input.slots.some(s => s.dispatch?.status === 'replied' && now - (s.dispatch.endedAt ?? 0) < 60_000)) tray = true
   const scene: Scene = { desks, walkers, away, hqStanding, briefSlide, tray, confettiSince, rooms, evening: eveningOf(input.hour + input.minute / 60), clock: { h: input.hour, m: input.minute } }

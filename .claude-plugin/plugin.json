@@ -1,6 +1,6 @@
 {
   "name": "agent-office",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Agent Office: your session's agents as office staff who walk to the warehouse, archives or workshop as they work, plus a live dashboard of context, cost, permissions and subagents. Forked from Flightdeck by Stephen Casella",
   "author": {
     "name": "Saurav Kalia",
@@ -190,9 +190,9 @@
     },
     "cellPx": {
       "title": "Cell size (px)",
-      "description": "Your terminal's character cell in pixels, as WxH (e.g. 7x17). The pixel office is drawn to fill whole cells exactly, so it stays sharp. Find it with: python3 -c \"import fcntl,termios,struct;r,c,x,y=struct.unpack('HHHH',fcntl.ioctl(1,termios.TIOCGWINSZ,b'0'*8));print(f'{x//c}x{y//r}')\"",
+      "description": "auto (default) measures your terminal's cell size in pixels, so the pixel office fills the pane exactly and stays sharp. Set WxH (e.g. 10x22) only if measuring doesn't work where you run Claude Code.",
       "type": "string",
-      "default": "7x17"
+      "default": "auto"
     }
   },
   "contributors": [

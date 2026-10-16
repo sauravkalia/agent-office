@@ -205,7 +205,7 @@ declare module 'claude-code' {
       building: Building
       dispatches: Dispatch[]
       /** Can this terminal show inline pictures: guessed from its environment, then confirmed by drawing one. */
-      pixelEnv: { images: boolean; denied: boolean }
+      pixelEnv: { images: boolean; denied: boolean; cell?: { w: number; h: number } | null }
     }
   }
 }

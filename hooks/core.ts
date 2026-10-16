@@ -173,7 +173,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
     routing: str('routing', 'auto') === 'off' ? 'off' : 'auto',
     officeStyle: str('officeStyle', 'text') === 'pixel' ? 'pixel' : 'text',
-    cellPx: str('cellPx', '7x17'),
+    cellPx: str('cellPx', 'auto'),
     departments: parseDepartments(typeof o.departments === 'string' ? o.departments : ''),
     supervisor: {
       lightModel: str('lightModel', 'claude-haiku-4-5'),

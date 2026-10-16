@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1
+
+- **Fills the pane:** the department office spans every column at the largest whole-number scale, and spare width goes into wider desks and rooms, so there's no empty strip on the right. It resizes with the pane. Before, it was sized from the assumed 7x17 cell, so on bigger cells the terminal showed it at its own small size.
+- **Measures the cell size** (`cellPx: auto`, the new default) by reading the terminal's window size with one `python3` call; a large Retina cell is assumed until that lands. `cellPx: WxH` still overrides.
+- **Name plates:** every desk carries its department's name and state in the art. The detached label rows under the picture are gone; one line lists the tasks in flight.
+
 ## 0.11.0
 
 - **Department office** (pixel mode with departments): a person per department at their own desk, HQ in the middle, and shared rooms with their names on the door (Archives, Warehouse, Server Rm, Workshop). People walk to HQ to collect a brief and carry it back, go to the room their session is working in, and bring a ✓ to HQ's in-tray (confetti) when they reply. Plus a 4-step eased walk, breathing, blinking, typing, coffee steam, bubbles that pop in, a red flash on failing commands, and window light that follows your clock.
