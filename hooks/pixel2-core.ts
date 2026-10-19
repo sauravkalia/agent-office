@@ -362,7 +362,8 @@ export const walkerOf = (a: Actor, now: number): Walker | null => {
 
 export type DeskState = 'closed' | 'idle' | 'busy'
 export type BubbleKind = 'busy' | 'idle' | 'reply' | 'sent' | 'alert'
-export type Desk = { slot: number; look: Look; label: string; state: DeskState; bubble: BubbleKind | null; bubbleSince: number; paper: boolean }
+/** `tag`: the repo it's working in, hung on the desk's front for a department of several. */
+export type Desk = { slot: number; look: Look; label: string; state: DeskState; bubble: BubbleKind | null; bubbleSince: number; paper: boolean; tag?: string | null }
 export type RoomFx = { zone: RoomZone; since: number; flash?: 'fail' | 'pass' }
 export type Scene = {
   desks: Desk[]
@@ -437,6 +438,19 @@ const plate = (f: Canvas, fr: { x: number; w: number }, y: number, d: Desk, tick
   else if (d.bubble === 'sent') SPR(f, ix, y + 1, ['aaaaa', 'kakak', 'aakaa', 'aaaaa'], { a: C.white, k: C.black })
   else if (d.bubble === 'reply') SPR(f, ix, y + 1, ['....k', '...kk', 'k.kk.', '.kk..'], { k: C.black })
   else SPR(f, ix, y + 1, ['kkk', '..k', '.k.', 'kkk'], { k: C.black })
+}
+
+/** A paper tag on the desk's front, between its legs: the repo, as short as reads (`sphere-v3-web` → `V3-WEB`). */
+const repoTag = (f: Canvas, cx: number, y: number, maxW: number, repo: string) => {
+  const chars = Math.max(1, Math.floor((maxW - 3) / 4))
+  let short = (/^[a-z0-9]+-./i.test(repo) ? repo.replace(/^[a-z0-9]+-/i, '') : repo).toUpperCase().replace(/[^A-Z0-9-]/g, '')
+  // Too long for the tag: the usual words go short before anything is cut (`V3-BACKEND` → `V3-BE`).
+  if (short.length > chars) short = short.replace(/BACKEND/g, 'BE').replace(/FRONTEND/g, 'FE').replace(/MOBILE/g, 'APP')
+  const text = short.slice(0, chars)
+  const w = text.length * 4 + 3
+  R(f, cx - Math.floor(w / 2), y, w, 7, C.paper)
+  R(f, cx - Math.floor(w / 2), y + 6, w, 1, C.grey)
+  SIGN(f, cx, y + 1, text, C.black)
 }
 
 const CONFETTI: readonly (readonly [number, number, RGB])[] = Array.from({ length: 26 }, (_, i) => {
@@ -627,6 +641,7 @@ export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
       R(f, x + 43, y + 20, 7, 6, C.plant)
     }
     plate(f, fr, y + 33, d, tick)
+    if (d.tag && !closed) repoTag(f, dx + Math.floor(dw / 2), y + 26, dw - 6, d.tag)
     if (d.paper && !away) {
       R(f, x + 12, y + 17, 6, 4, C.paper)
       R(f, x + 13, y + 18, 4, 1, C.grey)

@@ -175,14 +175,39 @@ test('the department office spans the whole pane; names live on the desks, not i
   }
 })
 
-test('a task HQ sends shows in the line under the office while it is out', { options: { departments: DEPTS } }, async ($, on) => {
+test('the work board under the office: the task, its repo, what the session is doing, and what waits', { options: { departments: 'PR Review=pr-reviews: reviews | Sphere Dev=GitHub: Sphere code (sphere-web, sphere-v3-web) | Social=social-expert: posts' } }, async ($, on) => {
   deptSetup(on, 'desk')
   await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
   await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
   await $.turn.start({ text: 'fix it', turnId: 'D1' })
-  await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: fix RadarChart' } as never)
+  await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: fix RadarChart in sphere-v3-web' } as never)
+  await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: retitle #501 in sphere-web' } as never)
   const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
-  expect(await ui.find({ text: /→ Sphere Dev: fix RadarChart/ })).toBeDefined()
+  expect(await ui.find({ text: /Sphere Dev/ })).toBeDefined()
+  // The oldest task is the one being worked on; the session answers its messages in order.
+  expect(await ui.find({ text: / · sphere-v3-web/ })).toBeDefined()
+  expect(await ui.find({ text: /fix RadarChart in sphere-v3-web/ })).toBeDefined()
+  expect(await ui.find({ text: /▸ researching radar chart/ })).toBeDefined()
+  expect(await ui.find({ text: /\+1 queued/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('a toast when a department starts on a task, and when it finishes', { options: { departments: 'PR Review=pr-reviews: reviews | Sphere Dev=GitHub: Sphere code (sphere-web, sphere-v3-web)' } }, async ($, on) => {
+  deptSetup(on, 'desk')
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(String((e as { text?: unknown }).text ?? JSON.stringify(e)))
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.turn.start({ text: 'fix it', turnId: 'T1' })
+  await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: fix RadarChart in sphere-v3-web' } as never)
+  // The next looks around find the department's session busy: one toast, not one per look.
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  expect(toasts.filter(t => /Sphere Dev is working on: fix RadarChart in sphere-v3-web \(sphere-v3-web\)/.test(t))).toHaveLength(1)
+  await $.turn.start({ text: '<cross-session-message from="uds:/tmp/1.sock" from-name="github-1" from-mode="prompting">\nRadarChart fixed, PR #612\n</cross-session-message>', turnId: 'T2' })
+  expect(toasts.some(t => /✓ Sphere Dev finished \(sphere-v3-web\): RadarChart fixed, PR #612/.test(t))).toBe(true)
 })

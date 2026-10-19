@@ -120,6 +120,8 @@ export type Dispatch = {
   dept: string
   folder: string
   task: string
+  /** The repo the brief names, when its department lists repos. */
+  repo?: string
   at: number
   status: 'sent' | 'replied'
   reply?: string
@@ -128,7 +130,7 @@ export type Dispatch = {
 
 /** What the last scan of the machine found. */
 /** What a session last wrote about itself for the department office: which room it's working in. */
-export type SessionStatus = { zone: string; text: string; isError: boolean; at: number }
+export type SessionStatus = { zone: string; text: string; isError: boolean; at: number; repo?: string }
 
 export type Building = {
   live: LiveSession[]
@@ -160,6 +162,8 @@ export type Route = {
   /** The session's own model and effort, as the engine names them before the supervisor's rewrite. */
   base: { model: string; effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null } | null
   lastStepAt: number
+  /** Per model|effort: when its cache was last written and how many tokens it held then. */
+  warm?: Record<string, { at: number; tokens: number }>
   /** The prompt you just typed, decided on at the turn's first request (when the session model is known). */
   pending: string | null
   last: { tier: string; why: string; note: string; isSwitch: boolean } | null

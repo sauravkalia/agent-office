@@ -64,7 +64,7 @@ test('the supervisor hands research to the engineer, and the org chart shows the
 
 // ---------------------------------------------------------------- departments
 
-import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, rosterText } from '../hooks/departments-core'
+import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, rosterText, settleIdle } from '../hooks/departments-core'
 
 const DEPTS = 'PR Review=pr-reviews: reviewing pull requests | Sphere Dev=sphere-web,sphere-v3-web: Sphere coding | Social=social-expert'
 const live = [
@@ -98,7 +98,7 @@ test('each folder is staffed by its most recently active session, or by HQ when 
   expect(deptOfSession(parseDepartments(DEPTS), live, 'sphere-v3-web-9f')).toEqual({ label: 'Sphere Dev', folder: 'sphere-v3-web' })
 })
 
-test('a reply closes the newest open dispatch to that session', () => {
+test('a reply closes the oldest open dispatch to that session: it answers in order', () => {
   const msg = '<cross-session-message from="uds:/tmp/x.sock" from-name="pr-reviews-35" from-mode="prompting">\nPR 504: 2 blockers, 1 minor.\nDetails…\n</cross-session-message>'
   expect(crossMessageOf(msg)).toEqual({ fromName: 'pr-reviews-35', body: 'PR 504: 2 blockers, 1 minor.' })
   expect(crossMessageOf('hello')).toBe(null)
@@ -109,6 +109,17 @@ test('a reply closes the newest open dispatch to that session', () => {
   const after = answerDispatch(list, 'pr-reviews-35', 'PR 504: 2 blockers', 9)
   expect(after[1]).toMatchObject({ status: 'replied', reply: 'PR 504: 2 blockers', endedAt: 9 })
   expect(after[0]).toEqual(list[0])
+  const two = [
+    { to: 'github-4b', dept: 'Sphere Dev', folder: 'GitHub', task: 'fix rows', at: 1, status: 'sent' as const },
+    { to: 'github-4b', dept: 'Sphere Dev', folder: 'GitHub', task: 'retitle #501', at: 2, status: 'sent' as const },
+  ]
+  const first = answerDispatch(two, 'github-4b', 'rows fixed', 5)
+  expect(first.map(x => x.status)).toEqual(['replied', 'sent'])
+  // One reply for both, then idle: the second counts as answered too. Still busy: it stays open.
+  const live = (status: string) => [{ sessionId: 's', name: 'github-4b', cwd: '/u/GitHub', status, kind: 'interactive', updatedAt: 5 }]
+  expect(settleIdle(first, live('idle'), 5 + 6_000).map(x => x.status)).toEqual(['replied', 'replied'])
+  expect(settleIdle(first, live('busy'), 5 + 6_000).map(x => x.status)).toEqual(['replied', 'sent'])
+  expect(settleIdle(first, live('idle'), 5 + 1_000).map(x => x.status)).toEqual(['replied', 'sent'])
 })
 
 test('HQ: a SendMessage to a department is tracked, its reply closes it, and the desks show both', { options: { departments: DEPTS } }, async ($, on) => {

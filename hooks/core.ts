@@ -176,7 +176,8 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     cellPx: str('cellPx', 'auto'),
     departments: parseDepartments(typeof o.departments === 'string' ? o.departments : ''),
     supervisor: {
-      lightModel: str('lightModel', 'claude-haiku-4-5'),
+      lightModel: str('lightModel', 'claude-haiku-5-5'),
+      standardModel: str('standardModel', 'claude-sonnet-5-5'),
       heavyModel: str('heavyModel', 'claude-opus-5-5'),
       lightEffort: effortOf(str('lightEffort', ''), 'low'),
       heavyEffort: effortOf(str('heavyEffort', ''), 'high'),

@@ -75,8 +75,57 @@ export const crossMessageOf = (text: string): { fromName: string; body: string }
   return { fromName: m[1] ?? '', body: shorten(body, 80) }
 }
 
-/** Dispatches after a reply from `fromName`: its newest open one is answered. */
+/** Dispatches after a reply from `fromName`: a session works through its messages in order, so its oldest open one is answered. */
 export const answerDispatch = (list: readonly Dispatch[], fromName: string, body: string, at: number): Dispatch[] => {
-  const open = [...list].reverse().find(x => x.to === fromName && x.status === 'sent')
+  const open = list.find(x => x.to === fromName && x.status === 'sent')
   return open ? list.map(x => (x === open ? { ...x, status: 'replied', reply: body, endedAt: at } : x)) : [...list]
 }
+
+/**
+ * A session often takes several queued messages in one turn and answers them all in one reply.
+ * Once it's idle after replying (and a few seconds have passed, so a second reply isn't on its
+ * way), every task sent to it before that reply counts as answered by it.
+ */
+export const settleIdle = (list: readonly Dispatch[], live: readonly LiveSession[], now: number, graceMs = 5_000): Dispatch[] => {
+  let out = [...list]
+  for (const s of live) {
+    if (s.status === 'busy' || !s.name) continue
+    const reply = [...out].reverse().find(x => x.to === s.name && x.status === 'replied' && x.endedAt !== undefined)
+    if (!reply || now - reply.endedAt! < graceMs) continue
+    out = out.map(x => (x.to === s.name && x.status === 'sent' && x.at < reply.endedAt! ? { ...x, status: 'replied', reply: reply.reply, endedAt: reply.endedAt } : x))
+  }
+  return out
+}
+
+// ---------------------------------------------------------------- the work board
+
+/** `Edit → hooks/core.ts` (a status line) → `editing hooks/core.ts`. */
+export const activityOf = (text: string) => {
+  const m = /^(\w+)(?: → (.*))?$/.exec(text.trim())
+  if (!m) return text.trim()
+  const verb: Record<string, string> = { Edit: 'editing', MultiEdit: 'editing', Write: 'writing', NotebookEdit: 'editing', Read: 'reading', Bash: 'running', Grep: 'searching', Glob: 'searching', WebSearch: 'researching', WebFetch: 'reading', Agent: 'handing off', Task: 'handing off', SendMessage: 'messaging' }
+  const v = verb[m[1]!] ?? m[1]!.toLowerCase()
+  return m[2] ? `${v} ${m[2]}` : v
+}
+
+export type BoardItem =
+  | { kind: 'working'; label: string; repo: string | null; task: string; since: number; activity: string | null; queued: number; isBusy: boolean }
+  | { kind: 'done'; label: string; repo: string | null; reply: string; at: number }
+
+/**
+ * One line of the board per department: the task it's on (its oldest open one, since a session
+ * answers its messages in order), how many wait behind it, and what its session is doing now; or,
+ * with nothing open, what it last finished, for a quarter of an hour.
+ */
+export const boardOf = (
+  depts: readonly { label: string; isBusy: boolean; repo: string | null; activity: string | null }[],
+  list: readonly Dispatch[],
+  now: number,
+): BoardItem[] =>
+  depts.flatMap((d): BoardItem[] => {
+    const open = list.filter(x => x.dept === d.label && x.status === 'sent')
+    const job = open[0]
+    if (job) return [{ kind: 'working', label: d.label, repo: d.repo ?? job.repo ?? null, task: job.task, since: job.at, activity: d.isBusy ? d.activity : null, queued: open.length - 1, isBusy: d.isBusy }]
+    const last = [...list].reverse().find(x => x.dept === d.label && x.status === 'replied')
+    return last && now - (last.endedAt ?? last.at) < 15 * 60_000 ? [{ kind: 'done', label: d.label, repo: last.repo ?? null, reply: last.reply ?? 'replied', at: last.endedAt ?? last.at }] : []
+  })

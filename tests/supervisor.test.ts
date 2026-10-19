@@ -3,7 +3,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import { SESSION, classify, decide, targetOf } from '../hooks/supervisor-core'
 import type { SupervisorConfig } from '../hooks/supervisor-core'
 
-const cfg: SupervisorConfig = { lightModel: 'claude-haiku-4-5', heavyModel: 'claude-opus-5-5', lightEffort: 'low', heavyEffort: 'high' }
+const cfg: SupervisorConfig = { lightModel: 'claude-haiku-4-5', standardModel: 'session', heavyModel: 'claude-opus-5-5', lightEffort: 'low', heavyEffort: 'high' }
+const tiers: SupervisorConfig = { ...cfg, lightModel: 'claude-haiku-5-5', standardModel: 'claude-sonnet-5-5' }
 const opus = { model: 'claude-opus-5-5[1m]', effort: 'medium' as const }
 const sonnet = { model: 'claude-sonnet-5-5', effort: 'high' as const }
 
@@ -61,6 +62,30 @@ test('an upgrade is taken for quality even when it costs a re-cache; a pin alway
   expect(pinned.isSwitch).toBe(true)
 })
 
+test('three tiers: everyday prompts go to the standard model, heavy ones back to the session Opus', () => {
+  expect(targetOf('standard', opus, tiers)).toEqual({ model: 'claude-sonnet-5-5', effort: null })
+  expect(targetOf('standard', sonnet, tiers)).toEqual(SESSION)
+  expect(targetOf('heavy', opus, tiers)).toEqual({ model: null, effort: 'high' })
+  expect(targetOf('standard', opus, { ...tiers, standardModel: 'session' })).toEqual(SESSION)
+})
+
+test('Haiku 5.5 is cheap enough that a quick question moves even with Claude Code\'s ~57k of context warm', () => {
+  const d = decide({ tier: 'light', current: SESSION, base: opus, ctxTokens: 57_000, isCacheWarm: true, isPinned: false, cfg: tiers })
+  expect(d.isSwitch).toBe(true)
+  expect(d.next).toEqual({ model: 'claude-haiku-5-5', effort: 'low' })
+  // Haiku 4.5 at ten times the price is not worth the re-cache there.
+  expect(decide({ tier: 'light', current: SESSION, base: opus, ctxTokens: 57_000, isCacheWarm: true, isPinned: false, cfg }).isSwitch).toBe(false)
+})
+
+test('going back to a model whose cache is still warm writes only what is new', () => {
+  const onOpusHigh = { model: null, effort: 'high' as const }
+  const cold = decide({ tier: 'standard', current: onOpusHigh, base: opus, ctxTokens: 80_000, isCacheWarm: true, isPinned: false, cfg: tiers })
+  expect(cold.isSwitch).toBe(false)
+  const warm = decide({ tier: 'standard', current: onOpusHigh, base: opus, ctxTokens: 80_000, isCacheWarm: true, isPinned: false, cfg: tiers, cached: { 'claude-sonnet-5-5|medium': 78_000 } })
+  expect(warm.isSwitch).toBe(true)
+  expect(warm.next).toEqual({ model: 'claude-sonnet-5-5', effort: null })
+})
+
 test('no change, no switch', () => {
   const d = decide({ tier: 'standard', current: SESSION, base: opus, ctxTokens: 50_000, isCacheWarm: true, isPinned: false, cfg })
   expect(d.isSwitch).toBe(false)
@@ -91,12 +116,32 @@ test('a quick question runs on Haiku; the next heavy one goes back up to Opus', 
   await $.turn.start({ text: 'refactor the config parser into its own module', turnId: 'R2' })
   await step('R2')
   expect(seen).toEqual([
-    { model: 'claude-haiku-4-5', effort: 'low' },
-    { model: 'claude-haiku-4-5', effort: 'low' },
+    { model: 'claude-haiku-5-5', effort: 'low' },
+    { model: 'claude-haiku-5-5', effort: 'low' },
     { model: 'claude-opus-5-5', effort: 'high' },
   ])
   const out = await $.command.run({ command: 'office', args: 'route', origin: { kind: 'user' } } as never)
   expect(JSON.stringify(out)).toContain('Switches this session | 2')
+})
+
+test('an everyday task runs on Sonnet between a quick question and a heavy one', async ($, on) => {
+  mock.clock(on)
+  on('ui.status', () => ({ value: undefined }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  const seen: string[] = []
+  on('turn.step', async function* (_$, e) {
+    seen.push(e.model)
+    const usage = { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: e.model }
+    yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage }
+  })
+  for (const [turnId, text] of [['T1', 'what does parseConfig return?'], ['T2', 'add a --json flag to the export command'], ['T3', 'refactor the config parser into its own module']] as const) {
+    await $.turn.start({ text, turnId })
+    const s = $.turn.step({ turnId, index: 0, model: 'claude-opus-5-5', effort: 'medium', messageCount: 1 })
+    for await (const _ of s) void _
+    await s.result
+  }
+  expect(seen).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'])
 })
 
 test('routing off leaves every step on the session model', { options: { routing: 'off' } }, async ($, on) => {
@@ -140,7 +185,7 @@ test("the office header shows the supervisor's last call", async ($, on) => {
     props: { title: 'Agent Office', isFocused: true, bodyColumns: 100, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 70 }, view: {} },
     surface: 'terminal',
   })
-  expect(await ui.find({ text: /light \(quick question\) → Haiku 4\.5/ })).toBeDefined()
-  expect(await ui.find({ text: /Haiku 4\.5 · main/ })).toBeDefined()
+  expect(await ui.find({ text: /light \(quick question\) → Haiku 5\.5/ })).toBeDefined()
+  expect(await ui.find({ text: /Haiku 5\.5 · main/ })).toBeDefined()
   await ui.unmount()
 })

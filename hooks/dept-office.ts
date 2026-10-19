@@ -16,6 +16,10 @@ export type SlotInfo = {
   /** The room its session's status file names, when that session is busy there. */
   zone: RoomZone | null
   isError: boolean
+  /** The repo it's working in, for a department of several; null when there's one or it can't tell. */
+  repo?: string | null
+  /** What its session is doing right now, in words. */
+  activity?: string | null
 }
 
 export type DeptInput = { slots: SlotInfo[]; hour: number; minute: number }
@@ -90,7 +94,7 @@ export const direct = (d: Director, input: DeptInput, now: number): { scene: Sce
     const b = d.bubbles.get(s.slot)
     if (!b || b.kind !== kind) d.bubbles.set(s.slot, { kind, since: now })
     const paper = s.dispatch?.status === 'sent' && d.briefDone.get(s.slot) === `${s.dispatch.at}`
-    return { slot: s.slot, look: s.look, label: s.label, state: s.state, bubble: kind, bubbleSince: d.bubbles.get(s.slot)!.since, paper }
+    return { slot: s.slot, look: s.look, label: s.label, state: s.state, bubble: kind, bubbleSince: d.bubbles.get(s.slot)!.since, paper, tag: s.state !== 'closed' && s.repo ? s.repo : null }
   })
   if (tray === false && input.slots.some(s => s.dispatch?.status === 'replied' && now - (s.dispatch.endedAt ?? 0) < 60_000)) tray = true
   const scene: Scene = { desks, walkers, away, hqStanding, briefSlide, tray, confettiSince, rooms, evening: eveningOf(input.hour + input.minute / 60), clock: { h: input.hour, m: input.minute } }

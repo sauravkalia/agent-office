@@ -64,15 +64,15 @@ import {
 import type { Config, Panel } from './core'
 import { base64, drawOffice, encodePng, rowsFor, termShowsImages } from './pixel-core'
 import type { Walk } from './pixel-core'
-import { cellFromWinsize, parseStatus } from './status-core'
+import { cellFromWinsize, parseStatus, repoInText, repoOfCall, reposIn, shortRepo } from './status-core'
 import { direct, newDirector } from './dept-office'
 import type { DeptInput, SlotInfo } from './dept-office'
 import { AW as ART_W, AH as ART_H, HQ_SLOT, ROOM_ZONES, drawScene, lookOf, parseCell, pixelBox, scaleInto, setLayout } from './pixel2-core'
 import type { RoomZone } from './pixel2-core'
 import { encodePngRgb } from './png-core'
-import { answerDispatch, crossMessageOf, deptOfSession, desksOf, rosterText } from './departments-core'
+import { activityOf, answerDispatch, boardOf, crossMessageOf, deptOfSession, desksOf, rosterText, settleIdle } from './departments-core'
 import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
-import { SESSION, applyTarget, classify, decide } from './supervisor-core'
+import { SESSION, applyTarget, cacheKey, classify, decide } from './supervisor-core'
 import type { Tier } from './supervisor-core'
 import { STORE_PREFIX, dayOf, lastDays, normalizeDay, recordTurn, staleKeys, usageReport } from './usage-core'
 import { ROOMS, zoneOf, finishErrand, namesFor, normalizeErrands, officeLine, officeRows, officeScene, orgLine, roleOf, roomLabel, startErrand, teamOf } from './office-core'
@@ -99,7 +99,7 @@ const roster = atom({ plugin: 'agent-office', key: 'roster' } as const, DEFAULT_
 const errands = atom({ plugin: 'agent-office', key: 'errands' } as const, {})
 const alerts = atom({ plugin: 'agent-office', key: 'alerts' } as const, { fired: [] })
 const sessionDay = atom({ plugin: 'agent-office', key: 'sessionDay' } as const, { day: '' })
-const DEFAULT_ROUTE: Route = { override: null, current: SESSION, base: null, lastStepAt: 0, pending: null, last: null, savedUsd: 0, switches: 0 }
+const DEFAULT_ROUTE: Route = { override: null, current: SESSION, base: null, lastStepAt: 0, warm: {}, pending: null, last: null, savedUsd: 0, switches: 0 }
 const route = atom({ plugin: 'agent-office', key: 'route' } as const, DEFAULT_ROUTE)
 const DEFAULT_BUILDING: Building = { live: [], past: [], scannedAt: 0, historyMtime: 0, problem: null }
 const building = atom({ plugin: 'agent-office', key: 'building' } as const, DEFAULT_BUILDING)
@@ -308,6 +308,7 @@ async function supervise($: EngineInterface, cfg: Config, text: string, base: No
     isCacheWarm: r.lastStepAt > 0 && now - r.lastStepAt < PROMPT_CACHE_MS,
     isPinned,
     cfg: cfg.supervisor,
+    cached: Object.fromEntries(Object.entries(r.warm ?? {}).filter(([, w]) => now - w.at < PROMPT_CACHE_MS).map(([k, w]) => [k, w.tokens])),
   })
   await update($, route, x => {
     const y = normalize(DEFAULT_ROUTE, x)
@@ -364,6 +365,31 @@ async function scanBuilding($: EngineInterface, cfg: Config, withHistory = true)
     }
   }
   await update($, building, () => ({ live, past, scannedAt: now, historyMtime, problem, status }))
+  if (cfg.departments.length > 0) {
+    const list = listOf<Dispatch>(await read($, dispatches))
+    const settled = settleIdle(list, live, now)
+    if (settled.some((x, i) => x !== list[i])) await update($, dispatches, () => settled)
+    await toastStarts($, cfg, live, status, now)
+  }
+}
+
+/**
+ * "Sphere Dev is working on …": once per task, when the department's session turns busy with a
+ * task HQ handed it in the last ten minutes, naming the repo it's in.
+ */
+const toasted = new Set<string>()
+async function toastStarts($: EngineInterface, cfg: Config, live: LiveSession[], status: Record<string, SessionStatus>, now: number) {
+  const list = listOf<Dispatch>(await read($, dispatches))
+  const selfId = await $.session.id().catch(() => '')
+  for (const d of cfg.departments) {
+    const job = list.find(x => x.dept === d.label && x.status === 'sent')
+    if (!job || toasted.has(`${job.dept}|${job.at}`) || now - job.at > 10 * 60_000) continue
+    const desk = desksOf(d, live, selfId).find(k => !k.isSelf && k.session?.name === job.to)
+    if (desk?.session?.status !== 'busy') continue
+    toasted.add(`${job.dept}|${job.at}`)
+    const repo = status[desk.session.sessionId]?.repo ?? job.repo
+    $.ui.toast(`${d.label} is working on: ${shorten(job.task, 60)}${repo ? ` (${repo})` : ''}`, { timeoutMs: 6000 })
+  }
 }
 
 /**
@@ -371,14 +397,25 @@ async function scanBuilding($: EngineInterface, cfg: Config, withHistory = true)
  * what it's doing. Written when the room or the line changes, at most every second otherwise.
  */
 let lastStatus = { key: '', at: 0 }
+/** The repo this session last worked in, for a folder of several repos; '' when it can't tell. */
+let lastRepo = ''
+/** The session folder's own folders (its repos, in a folder of several), looked up once a minute. */
+let folders = { cwd: '', at: 0, names: new Set<string>() }
+async function subfolders($: EngineInterface, cwd: string) {
+  const now = await $.clock.now()
+  if (folders.cwd === cwd && now - folders.at < 60_000) return folders.names
+  const list = await $.fs.list(cwd).catch(() => [])
+  folders = { cwd, at: now, names: new Set(list.filter(f => f.kind === 'dir' && !f.name.startsWith('.')).map(f => f.name)) }
+  return folders.names
+}
 async function writeStatus($: EngineInterface, zone: string, text: string, isError = false) {
   const now = await $.clock.now()
-  const key = `${zone}|${text}|${isError}`
+  const key = `${zone}|${text}|${isError}|${lastRepo}`
   if (key === lastStatus.key && now - lastStatus.at < 1000) return
   lastStatus = { key, at: now }
   const [home, sid] = await Promise.all([$.env.get('HOME'), $.session.id().catch(() => '')])
   if (!home || !sid) return
-  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now }))
+  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now, ...(lastRepo ? { repo: lastRepo } : {}) }))
 }
 
 /**
@@ -599,6 +636,7 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
+      lastRepo = ''
       await resetAll($)
       await refreshStatus($, cfg)
     }
@@ -653,8 +691,10 @@ export const register: Register = (on, options) => {
       if (cross) {
         const at = await $.clock.now()
         const list = listOf<Dispatch>(await read($, dispatches))
-        if (list.some(x => x.to === cross.fromName && x.status === 'sent')) {
+        const done = list.find(x => x.to === cross.fromName && x.status === 'sent')
+        if (done) {
           await update($, dispatches, l => answerDispatch(listOf<Dispatch>(l), cross.fromName, cross.body, at))
+          $.ui.toast(`✓ ${done.dept} finished${done.repo ? ` (${done.repo})` : ''}: ${cross.body}`, { timeoutMs: 8000 })
         }
         await say($, cross.fromName || 'peer', `replied: ${cross.body}`, 'done')
       } else await say($, p.who, p.text)
@@ -683,6 +723,13 @@ export const register: Register = (on, options) => {
       await update($, route, x => ({ ...normalize(DEFAULT_ROUTE, x), base, lastStepAt: sentAt }))
       const r = await getRoute($)
       const routed = modeOf(r, cfg) === 'off' ? e : { ...e, ...applyTarget(r.current, e) }
+      // This step writes (or reads) the cache of the model and effort it runs on.
+      const ctxNow = (await getUsage($)).tokens ?? 0
+      const key = cacheKey({ model: routed.model, effort: typeof routed.effort === 'string' ? routed.effort : null }, base)
+      await update($, route, x => {
+        const y = normalize(DEFAULT_ROUTE, x)
+        return { ...y, warm: { ...(y.warm ?? {}), [key]: { at: sentAt, tokens: ctxNow } } }
+      })
       // The main box shows what the step actually runs on.
       await update($, main, m => {
         const x = normalize(DEFAULT_MAIN, m)
@@ -783,6 +830,11 @@ export const register: Register = (on, options) => {
       await update($, errands, x => startErrand(normalizeErrands(x), who, errand))
     }
     const room = ROOM_OF[zoneOf(e.tool)] ?? 'desk'
+    if (isErrand) {
+      const cwd = await $.session.cwd().catch(() => '')
+      const repo = repoOfCall(cwd, e, await subfolders($, cwd))
+      if (repo) lastRepo = repo
+    }
     if (isErrand) void writeStatus($, room, shorten(describeInput(e.tool, e), 40)).catch(() => undefined)
     const ran = await next(e).finally(() => callLoop.delete(e.tool_use_id))
     const didRun = ran.deny === undefined
@@ -813,8 +865,9 @@ export const register: Register = (on, options) => {
       const b = normalize(DEFAULT_BUILDING, await read($, building))
       const where = deptOfSession(cfg.departments, b.live, to)
       if (to && where) {
-        const task = shorten(message.split('\n').map(l => l.replace(/^task from hq:\s*/i, '').trim()).find(Boolean) ?? '', 70)
-        const d: Dispatch = { to, dept: where.label, folder: where.folder, task, at: await $.clock.now(), status: 'sent' }
+        const task = shorten(message.split('\n').map(l => l.replace(/^task from hq:\s*/i, '').trim()).find(Boolean) ?? '', 140)
+        const repo = repoInText(message, reposIn(cfg.departments.find(x => x.label === where.label)?.handles ?? ''))
+        const d: Dispatch = { to, dept: where.label, folder: where.folder, task, ...(repo ? { repo } : {}), at: await $.clock.now(), status: 'sent' }
         await update($, dispatches, l => [...listOf<Dispatch>(l), d].slice(-30))
         await say($, 'supervisor', `→ ${where.label} (${to}): ${task}`, 'consult')
       }
@@ -1191,22 +1244,46 @@ export const register: Register = (on, options) => {
         const desk = desks.find(k => (k.isSelf ? m.isRunning : k.session?.status === 'busy')) ?? desks[0]
         const st = desk?.session ? bld.status?.[desk.session.sessionId] : undefined
         const zone = st && (ROOM_ZONES as readonly string[]).includes(st.zone) ? (st.zone as RoomZone) : null
-        slots.push({ slot: [0, 2, 3, 4, 5][i]!, label: d.label, look: lookOf(d.label), state: stateOf(desk?.session), dispatch: [...sent].reverse().find(x => x.dept === d.label) ?? null, zone, isError: st?.isError ?? false })
+        const job = sent.find(x => x.dept === d.label && x.status === 'sent') ?? [...sent].reverse().find(x => x.dept === d.label) ?? null
+        const repo = (desk?.session?.status === 'busy' ? st?.repo : undefined) ?? (job?.status === 'sent' ? job.repo : undefined) ?? null
+        slots.push({ slot: [0, 2, 3, 4, 5][i]!, label: d.label, look: lookOf(d.label), state: stateOf(desk?.session), dispatch: job, zone, isError: st?.isError ?? false, repo, activity: st?.text ? activityOf(st.text) : null })
       })
       const t = new Date(now)
       return { slots, hour: t.getHours(), minute: t.getMinutes() }
     }
-    // Names and states are on the desks' own plates; under the picture, only what's in flight.
-    const deptTicker = (input: DeptInput, w: number) => {
-      const items = input.slots
-        .filter(s => s.dispatch && (s.dispatch.status === 'sent' || now - (s.dispatch.endedAt ?? s.dispatch.at) < 15 * 60_000))
-        .map(s => ({ text: s.dispatch!.status === 'sent' ? `→ ${s.label}: ${s.dispatch!.task}` : `✓ ${s.label}: ${s.dispatch!.reply ?? 'replied'}`, color: s.dispatch!.status === 'sent' ? C.amber : C.gate }))
-      return items.length === 0 ? null : (
-        <Text wrap="truncate">
-          {items.map((it, i) => (
-            <Text color={it.color}>{`${i > 0 ? '   ' : ''}${shorten(it.text, Math.max(20, Math.floor(w / items.length) - 3))}`}</Text>
-          ))}
-        </Text>
+    // Names and states are on the desks' own plates; under the picture, the work board: what each
+    // department is on, in which repo, what it's doing right now, and what waits behind it.
+    const deptBoard = (input: DeptInput, w: number) => {
+      const items = boardOf(
+        input.slots.filter(x => x.slot !== HQ_SLOT).map(x => ({ label: x.label, isBusy: x.state === 'busy', repo: x.repo ?? null, activity: x.activity ?? null })),
+        sent,
+        now,
+      )
+      if (items.length === 0) return null
+      const inner = Math.max(10, w - 4)
+      return (
+        <Box flexDirection="column" width={w}>
+          {items.map(it =>
+            it.kind === 'done' ? (
+              <Text key={`board-${it.label}`} color={C.gate} wrap="truncate">{`✓ ${it.label}${it.repo ? ` · ${it.repo}` : ''} · ${shorten(it.reply, Math.max(10, w - it.label.length - 18))} (${agoOf(it.at, now)} ago)`}</Text>
+            ) : (
+              <Box key={`board-${it.label}`} flexDirection="column" borderStyle="round" borderColor={it.isBusy ? C.amber : C.faint} paddingX={1} width={w}>
+                <Box justifyContent="space-between" width={inner}>
+                  <Text wrap="truncate">
+                    <Text color={C.text} bold>{it.label}</Text>
+                    <Text color={C.dim}>{it.repo ? ` · ${it.repo}` : ''}</Text>
+                  </Text>
+                  <Text color={C.faint}>{agoOf(it.since, now)}</Text>
+                </Box>
+                <Text color={C.amber} wrap="wrap">{shorten(it.task, inner * 2 - 2)}</Text>
+                <Box justifyContent="space-between" width={inner}>
+                  <Text color={it.isBusy ? C.agent : C.dim} wrap="truncate">{it.isBusy ? `▸ ${it.activity ?? 'thinking'}` : '… waiting to start'}</Text>
+                  <Text color={C.amber}>{it.queued > 0 ? ` +${it.queued} queued` : ''}</Text>
+                </Box>
+              </Box>
+            ),
+          )}
+        </Box>
       )
     }
     const deptFloor = (w: number) => {
@@ -1227,7 +1304,7 @@ export const register: Register = (on, options) => {
         return (
           <Box flexDirection="column" width={w}>
             <Image key="office-dept" source={{ png: deptFrame(input, now, box).png }} columns={box.cols} rows={box.rows} alt={input.slots.map(s => `${s.label} ${s.state}`).join(' · ')} />
-            {deptTicker(input, w)}
+            {deptBoard(input, w)}
           </Box>
         )
       }
@@ -1238,7 +1315,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" width={w}>
           <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${ART_W * 3}" height="${ART_H * 3}" viewBox="0 0 ${ART_W * 2} ${ART_H * 2}"><image href="data:image/png;base64,${png}" width="${ART_W * 2}" height="${ART_H * 2}" style="image-rendering:pixelated"/></svg>`} alt="department office" width={ART_W * 3} height={ART_H * 3} />
-          {deptTicker(input, w)}
+          {deptBoard(input, w)}
         </Box>
       )
     }
@@ -1323,6 +1400,8 @@ export const register: Register = (on, options) => {
           </Text>
         ) : null}
         {showOrg ? orgChart(w) : null}
+        {/* The text office has no picture to hang the board under: it follows the org chart. */}
+        {showOrg && cfg.departments.length > 0 && sent.length > 0 ? deptBoard(deptInput(), w) : null}
         {floor ?? (hasClient ? (
           <els.Client
             key="office"

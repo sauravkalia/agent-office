@@ -37,9 +37,16 @@ export const classify = (text: string, o: { isPlanMode?: boolean } = {}): { tier
 
 type Price = { input: number; output: number; read: number; window: number }
 
-/** $/MTok by family (Claude API list prices); unknown models price as the session's tier, Opus. */
-export const priceOf = (model: string): Price =>
-  /haiku/i.test(model)
+/**
+ * $/MTok (Claude API list prices); unknown models price as the session's tier, Opus. Haiku 5.x
+ * costs a tenth of Haiku 4.5 up to 100K prompt tokens and five times that beyond.
+ */
+export const priceOf = (model: string, ctxTokens = 0): Price =>
+  /haiku-[5-9]/i.test(model)
+    ? ctxTokens > 100_000
+      ? { input: 0.5, output: 2.5, read: 0.05, window: 1_000_000 }
+      : { input: 0.1, output: 0.5, read: 0.01, window: 1_000_000 }
+    : /haiku/i.test(model)
     ? { input: 1, output: 5, read: 0.1, window: 200_000 }
     : /sonnet/i.test(model)
       ? { input: 2, output: 10, read: 0.2, window: 1_000_000 }
@@ -59,17 +66,27 @@ export const sameFamily = (a: string, b: string) => family(a).toLowerCase() === 
 
 // ---------------------------------------------------------------- decide
 
-export type SupervisorConfig = { lightModel: string; heavyModel: string; lightEffort: Effort; heavyEffort: Effort }
+/** `standardModel` empty or `session`: everyday prompts stay on the session's own model. */
+export type SupervisorConfig = { lightModel: string; standardModel: string; heavyModel: string; lightEffort: Effort; heavyEffort: Effort }
 
 /** The target a tier asks for, in the session's own model id where the family matches (keeps its cache and its [1m]). */
 export const targetOf = (tier: Tier, base: { model: string }, cfg: SupervisorConfig): Target => {
-  if (tier === 'standard') return SESSION
+  if (tier === 'standard') {
+    const model = cfg.standardModel.trim()
+    return !model || model === 'session' || sameFamily(model, base.model) ? SESSION : { model, effort: null }
+  }
   const model = tier === 'light' ? cfg.lightModel : cfg.heavyModel
   const effort = tier === 'light' ? cfg.lightEffort : cfg.heavyEffort
   return { model: sameFamily(model, base.model) ? null : model, effort }
 }
 
 const resolve = (t: Target, base: { model: string; effort: Effort | null }) => ({ model: t.model ?? base.model, effort: t.effort ?? base.effort ?? 'high' })
+
+/** The prompt cache is per model and effort: the key a warm cache is filed under. */
+export const cacheKey = (t: Target, base: { model: string; effort: Effort | null }) => {
+  const r = resolve(t, base)
+  return `${r.model}|${r.effort}`
+}
 
 export type Decision = { next: Target; isSwitch: boolean; note: string; costUsd: number; savingUsd: number }
 
@@ -81,6 +98,8 @@ export const decide = (o: {
   isCacheWarm: boolean
   isPinned: boolean
   cfg: SupervisorConfig
+  /** Tokens still cached (under an hour old) per cacheKey: going back to a model used earlier writes only what's new. */
+  cached?: Readonly<Record<string, number>>
 }): Decision => {
   const want = targetOf(o.tier, o.base, o.cfg)
   const cur = resolve(o.current, o.base)
@@ -88,14 +107,18 @@ export const decide = (o: {
   const label = `${prettyModel(tgt.model)}${/haiku/i.test(tgt.model) ? '' : ` (${tgt.effort})`}`
   if (cur.model === tgt.model && cur.effort === tgt.effort) return { next: o.current, isSwitch: false, note: `stays on ${label}`, costUsd: 0, savingUsd: 0 }
 
-  const pc = priceOf(cur.model)
-  const pt = priceOf(tgt.model)
   const ctx = Math.max(0, o.ctxTokens)
+  const pc = priceOf(cur.model, ctx)
+  const pt = priceOf(tgt.model, ctx)
   if (ctx > pt.window * 0.8) {
     return { next: o.current, isSwitch: false, note: `kept ${prettyModel(cur.model)}: ${kTokens(ctx)} of context won't fit ${prettyModel(tgt.model)}`, costUsd: 0, savingUsd: 0 }
   }
-  // A warm cache is lost by the switch; a cold one is rewritten anyway, so only the price gap counts.
-  const costUsd = Math.max(0, (o.isCacheWarm ? ctx * pt.input * WRITE : ctx * (pt.input - pc.input) * WRITE) / 1e6)
+  // The switch writes what the target hasn't cached; staying rewrites everything only when the
+  // current cache has gone cold anyway, so the switch costs the difference.
+  const onTarget = Math.min(ctx, o.cached?.[cacheKey(want, o.base)] ?? 0)
+  const writeTarget = (ctx - onTarget) * pt.input * WRITE
+  const writeStay = o.isCacheWarm ? 0 : ctx * pc.input * WRITE
+  const costUsd = Math.max(0, (writeTarget - writeStay) / 1e6)
   const steps = STEPS[o.tier]
   const savingUsd = (steps * (ctx * (pc.read - pt.read) + OUT_PER_STEP * (pc.output * EFFORT_OUT[cur.effort] - pt.output * EFFORT_OUT[tgt.effort]))) / 1e6
   const isUpgrade = pt.output > pc.output || (pt.output === pc.output && EFFORT_RANK[tgt.effort] > EFFORT_RANK[cur.effort])

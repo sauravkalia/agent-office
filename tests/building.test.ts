@@ -1,6 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { agoOf, buildingScene, parseHistory, parseLive, projectOf } from '../hooks/building-core'
+import { activityOf, boardOf } from '../hooks/departments-core'
+import { repoInText, repoOfCall, repoOfPath, reposIn } from '../hooks/status-core'
 
 const H = (o: Record<string, unknown>) => JSON.stringify({ pastedContents: {}, ...o })
 
@@ -91,4 +93,49 @@ test('/office building shows every session on the machine, and b flips back', as
   await ui.press({ key: 'scene' })
   expect(await ui.find({ text: /office · \d+ at work/ })).toBeDefined()
   await ui.unmount()
+})
+
+// ---------------------------------------------------------------- which repo, the board
+
+
+test('a session in a folder of repos says which one it works in', () => {
+  const cwd = '/u/GitHub'
+  expect(repoOfPath(cwd, '/u/GitHub/sphere-v3-web/src/Row.tsx')).toBe('sphere-v3-web')
+  expect(repoOfPath(cwd, 'sphere-web/package.json')).toBe('sphere-web')
+  expect(repoOfPath(cwd, '/u/GitHub/notes.md')).toBe(null)
+  expect(repoOfPath(cwd, '/tmp/x/y.ts')).toBe(null)
+  expect(repoOfCall(cwd, { command: 'cd sphere-v3-backend && npm test' })).toBe('sphere-v3-backend')
+  expect(repoOfCall(cwd, { command: 'git -C /u/GitHub/sphere-web status' })).toBe('sphere-web')
+  expect(repoOfCall(cwd, { pattern: 'x', path: 'sphere-iconic-web' })).toBe('sphere-iconic-web')
+  expect(repoOfCall(cwd, { command: 'npm test' })).toBe(null)
+  const dirs = new Set(['sphere-web', 'sphere-v3-web'])
+  expect(repoOfCall(cwd, { command: 'echo hello > sphere-v3-web/notes.md' }, dirs)).toBe('sphere-v3-web')
+  expect(repoOfCall(cwd, { command: 'cat ./sphere-web/package.json | head' }, dirs)).toBe('sphere-web')
+  expect(repoOfCall(cwd, { command: 'ls src/lib' }, dirs)).toBe(null)
+  expect(repoOfPath('/private/tmp/x/GitHub', '/tmp/x/GitHub/sphere-web/a.ts')).toBe('sphere-web')
+  const repos = reposIn('coding in the Sphere repos (sphere-web, sphere-v3-web); name the repo')
+  expect(repos).toEqual(['sphere-web', 'sphere-v3-web'])
+  expect(repoInText('fix the rows in sphere-v3-web', repos)).toBe('sphere-v3-web')
+  expect(repoInText('retitle #501 in sphere-web', repos)).toBe('sphere-web')
+  expect(repoInText('look at the backend', repos)).toBe(null)
+})
+
+test('the board: the oldest open task with a queue count, or the last finished one for 15 minutes', () => {
+  expect(activityOf('Edit → src/Row.tsx')).toBe('editing src/Row.tsx')
+  expect(activityOf('Bash → npm test')).toBe('running npm test')
+  const list = [
+    { to: 'gh', dept: 'Sphere Dev', folder: 'GitHub', task: 'fix rows', repo: 'sphere-v3-web', at: 1, status: 'sent' as const },
+    { to: 'gh', dept: 'Sphere Dev', folder: 'GitHub', task: 'retitle', at: 2, status: 'sent' as const },
+    { to: 'pr', dept: 'PR Review', folder: 'pr-reviews', task: 'review 407', at: 1, status: 'replied' as const, reply: 'LGTM', endedAt: 60_000 },
+  ]
+  const depts = [
+    { label: 'Sphere Dev', isBusy: true, repo: null, activity: 'editing Row.tsx' },
+    { label: 'PR Review', isBusy: false, repo: null, activity: null },
+    { label: 'Social', isBusy: false, repo: null, activity: null },
+  ]
+  expect(boardOf(depts, list, 120_000)).toEqual([
+    { kind: 'working', label: 'Sphere Dev', repo: 'sphere-v3-web', task: 'fix rows', since: 1, activity: 'editing Row.tsx', queued: 1, isBusy: true },
+    { kind: 'done', label: 'PR Review', repo: null, reply: 'LGTM', at: 60_000 },
+  ])
+  expect(boardOf(depts, list, 60_000 + 16 * 60_000).map(x => x.label)).toEqual(['Sphere Dev'])
 })
