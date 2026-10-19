@@ -65,7 +65,7 @@ Each worker keeps the same name for the session and mutters something about the 
 - **While a department works:** it walks to the room its session is in. That's the Archives for reading code, the Warehouse for web research, the Workshop for edits and the Server Rm for commands (red flash on a failure). Back at the desk between steps.
 - **When it replies:** it carries a ✓ to HQ's in-tray, and there's confetti.
 - **Life:** breathing, blinking, typing hands, a 4-step walk with easing, coffee steam, monitors, a pulsing ring light, bubbles that pop in, and window light that follows your clock from afternoon to evening lamps.
-- **Name plates:** each desk has its department's name on a coloured plate in the picture, with its state at the right end: ■ busy, ✉ task out, ✓ replied, z idle. A grey plate means the tab isn't open. Under the picture, one line lists what's in flight (`→ Sphere Dev: fix RadarChart   ✓ Social: 3 captions ready`).
+- **Name plates:** each desk has its department's name on a coloured plate in the picture, with its state at the right end: ■ busy, ✉ task out, ✓ replied, z idle. A grey plate means the tab isn't open. Under the picture is the work board (see Departments). For a department of several repos, a paper tag on the desk front names the one it's in (`V3-WEB`, `ICONIC`, `V3-BE`).
 
 **Sharp and full width.** The picture spans every column of the pane. It's drawn at the largest whole-number scale that fits, and the spare width goes into wider desks and rooms, so the terminal never stretches it and no strip is left empty. It's redrawn to the new size when you resize the pane. That needs your cell size in pixels, which the mod measures itself (`cellPx: auto`) with one short `python3` call that reads the terminal's window size. If measuring doesn't work where you run Claude Code, set `cellPx` to `WxH` in `/config`. To find it, run:
 
@@ -150,11 +150,27 @@ How it works:
 - `/agent-office:assign` looks up which sessions are running in those folders (Claude Code's session registry) and adds the list to the task. In a folder with two sessions open, the most recently active one gets the work. `/office departments` shows the same list.
 - The supervisor sends the task to that session with `SendMessage` (a self-contained brief starting `Task from HQ:`), tells you where it went, and carries on. The department works in its own terminal and replies; the reply shows in HQ's log and on the department's desk.
 - Once a session has sent work out, its office shows the departments under the supervisor: each one's session, busy (⠿) or idle, and the last task (`→ …`) or reply (`✓ …`).
+- **The work board** (under the pixel office, or under the org chart in the text office) has a card for each department with work out:
+
+  ```
+  ╭───────────────────────────────────────────╮
+  │ Sphere Dev · sphere-v3-web             4m │
+  │ fix "..." rows on Awaiting configuration  │
+  │ ▸ editing ProgressRow.tsx       +2 queued │
+  ╰───────────────────────────────────────────╯
+  ✓ Social · 3 captions ready (2m ago)
+  ```
+
+  It shows the task it's on (the oldest one open, since a session answers its messages in order), the **repo**, what its session is doing right now, and how many more tasks wait behind it. A finished department becomes a ✓ line for 15 minutes.
+- **Which repo:** the department's tab works it out from the files it reads and edits and the folders its commands use (`~/Documents/GitHub/sphere-v3-web/…` → `sphere-v3-web`). Until it touches one, the board shows the repo the brief names, matched against the repos listed in brackets in the department's description.
+- **Toasts:** "Sphere Dev is working on: … (sphere-v3-web)" when its tab picks up a task, and "✓ Sphere Dev finished: …" when it replies.
+- A department often takes several queued tasks in one turn and answers them in one reply. Once its tab is idle after that reply, every task sent before it counts as answered.
 - If a department's session isn't open, the supervisor says so and offers to do it with the team instead.
 
 What to know:
 
 - **Keep departments open.** HQ can message a running session, not start a closed one.
+- **Give them fixed names.** `claude -n sphere-dev` in `~/Documents/GitHub` (and so on) keeps the name HQ messages the same across `/clear`. Without `-n`, a restarted session gets a new name (`pr-reviews-15` → `pr-reviews-5a`).
 - **Same permission mode.** A session in a different permission mode than HQ holds incoming messages until you approve them there. Permission prompts for the work itself appear in the department's terminal.
 - **Departments treat HQ as a teammate.** They do the work within their own permissions, and won't push, post or merge on HQ's say-so alone; the playbook doesn't ask them to.
 - The department list appears in your prompt line in HQ's transcript; that's how it reaches the supervisor.
@@ -186,18 +202,19 @@ Each prompt you type is sorted by its words alone (no model call, no tokens):
 
 | Tier | Sent by | Runs on (default) |
 | --- | --- | --- |
-| **light** | short questions: "what does…", "list…", "show…", "run…", "rename…" | `claude-haiku-4-5` |
-| **standard** | everyday tasks | your session model, untouched |
+| **light** | short questions: "what does…", "list…", "show…", "run…", "rename…" | `claude-haiku-5-5` |
+| **standard** | everyday tasks | `claude-sonnet-5-5` (`session` keeps your session model) |
 | **heavy** | "design", "debug", "refactor", "why does…", "migrate", "review", a stack trace, a long brief, plan mode | `claude-opus-5-5` at `high` effort |
 | *continue* | "yes", "ok go ahead", "do it" | whatever ran last; a go-ahead never drops a task to Haiku |
 
-Every step of the turn then runs on that model; subagents keep their own. The office header shows the call: `model light (quick question) → Haiku 4.5 · saves ~$0.01`.
+Every step of the turn then runs on that model; subagents keep their own. The office header shows the call: `model light (quick question) → Haiku 5.5 · saves ~$0.07`.
 
 **Switching isn't free, and the supervisor knows it.** The prompt cache belongs to one model, and changing effort invalidates it too, so every switch re-sends the whole conversation at the cache-write price. Claude Code's own system prompt and tools are roughly 40k tokens before you type anything, so even an early switch to Opus costs around $0.30 to re-cache. The rules:
 
-- **Downgrades** (to Haiku, or to lower effort) happen only when the estimated saving over the turn beats the re-cache. Early in a session, or after the cache has gone cold (an hour idle), that's usually true. Deep into a long session it usually isn't, and the log says why: `kept Opus 5.5: switching re-caches 150k (~$1.20) to save ~$0.05`.
+- **Downgrades** (to Sonnet or Haiku, or to lower effort) happen only when the estimated saving over the turn beats the re-cache. Haiku 5.5 is cheap enough ($0.10/$0.50) that a quick question usually moves even with Claude Code's own context warm.
+- **Going back** to a model and effort used in the last hour costs only what's new since then, since its cache is still warm. So after a heavy turn on Opus, the next everyday prompt can drop back to Sonnet. Early in a session, or after the cache has gone cold (an hour idle), that's usually true. Deep into a long session it usually isn't, and the log says why: `kept Opus 5.5: switching re-caches 150k (~$1.20) to save ~$0.05`.
 - **Upgrades** are always taken, because quality comes first, and the re-cache cost is shown.
-- Context that won't fit the target (Haiku has 200K) is never switched to.
+- Context that won't fit the target (Haiku 4.5 has 200K) is never switched to.
 
 ```
 /office route                 # what it runs on now, last decision, switches, estimated saving
@@ -205,7 +222,7 @@ Every step of the turn then runs on that model; subagents keep their own. The of
 /office route auto|off        # back to routing / leave the session model alone
 ```
 
-Set the defaults in `/config`: `routing` (`auto`/`off`), `lightModel`, `heavyModel`, `lightEffort`, `heavyEffort`. The savings are estimates (about 800 output tokens per step, 3/8/15 steps for light/standard/heavy turns, list prices); `/office usage` shows what was actually spent.
+Set the defaults in `/config`: `routing` (`auto`/`off`), `lightModel`, `standardModel`, `heavyModel`, `lightEffort`, `heavyEffort`. The savings are estimates (about 800 output tokens per step, 3/8/15 steps for light/standard/heavy turns, list prices); `/office usage` shows what was actually spent.
 
 ## Budget alerts
 
@@ -252,7 +269,8 @@ Compared with upstream, Agent Office adds:
 | `$.ui.toast` | budget and context alerts |
 | `$.env.get` of `TERM`, `TERM_PROGRAM`, `TMUX`, `KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR`, `WEZTERM_EXECUTABLE`; `$.ui.blit` | the pixel office: whether the terminal shows pictures, and its animation |
 | `$.process.run` of `python3 -c …` (reads the terminal's window size, nothing else) | the pixel office: your cell size in pixels, so it fills the pane sharply |
-| `$.fs.write` of `~/.claude/agent-office/status/<session>.json`; `$.fs.read` of the department sessions' status files | the department office: which room each department is working in |
+| `$.fs.write` of `~/.claude/agent-office/status/<session>.json`; `$.fs.read` of the department sessions' status files | the department office: which room each department is working in, and which repo |
+| `$.session.cwd`; `$.fs.list` of the session's own folder (folder names only, once a minute) | which repo a shell command works in, in a folder of several |
 | `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
 `claude plugin validate .` prints exactly what it hooks and calls.
@@ -275,7 +293,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | `palette` | `office` | `office` is warm wood and lamplight for dark terminals; `theme` follows your Claude Code theme (use it on light terminals); `pastel` is Flightdeck's fixed colours |
 | `panels` | `office,main,agents,gate,architect,receipt,loops,log` | which panels show, in order |
 | `routing` | `auto` | the Supervisor: `auto` routes each prompt, `off` keeps the session model |
-| `lightModel` / `heavyModel` | `claude-haiku-4-5` / `claude-opus-5-5` | models for light and heavy prompts |
+| `lightModel` / `standardModel` / `heavyModel` | `claude-haiku-5-5` / `claude-sonnet-5-5` / `claude-opus-5-5` | models for light, everyday and heavy prompts (`standardModel: session` keeps the session model) |
 | `lightEffort` / `heavyEffort` | `low` / `high` | effort for light and heavy prompts |
 | `officeStyle` | `text` | `pixel` draws the office as pixel art where the terminal shows pictures |
 | `cellPx` | `auto` | your terminal's cell size in pixels; `auto` measures it, so the pixel office fills the pane and stays sharp |

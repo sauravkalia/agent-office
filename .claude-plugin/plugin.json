@@ -1,6 +1,6 @@
 {
   "name": "agent-office",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "Agent Office: your session's agents as office staff who walk to the warehouse, archives or workshop as they work, plus a live dashboard of context, cost, permissions and subagents. Forked from Flightdeck by Stephen Casella",
   "author": {
     "name": "Saurav Kalia",
@@ -141,7 +141,13 @@
       "title": "Light model",
       "description": "Model for quick questions",
       "type": "string",
-      "default": "claude-haiku-4-5"
+      "default": "claude-haiku-5-5"
+    },
+    "standardModel": {
+      "title": "Standard model",
+      "description": "Model for everyday tasks; session keeps the session's own model",
+      "type": "string",
+      "default": "claude-sonnet-5-5"
     },
     "heavyModel": {
       "title": "Heavy model",

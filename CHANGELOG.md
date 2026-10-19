@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0
+
+- **Supervisor: three tiers.** Quick questions go to Haiku 5.5, everyday tasks to Sonnet 5.5 (the new `standardModel` setting; `session` keeps the old behaviour), and heavy work to Opus 5.5 at high effort. Before, everything but quick questions stayed on the session model. Quick questions mostly stayed there too, because switching to Haiku 4.5 never paid for re-caching Claude Code's ~50k tokens of context.
+- Prices per model version (Haiku 5.x is $0.10/$0.50, a tenth of Haiku 4.5). The supervisor also remembers which models and efforts it used in the last hour, so going back to one only pays for what's new. After a heavy turn on Opus, the next everyday prompt can drop back to Sonnet.
+- **Work board** under the department office (and the text office): per department, the task, the repo, what its tab is doing right now, and `+N queued`. It replaces the one-line ticker that cut off at ~50 columns.
+- **Repo detection:** a department in a folder of several repos says which one it's in, from file paths, `cd`/`git -C`, and paths in shell commands. Until then, the repo named in the brief is used. Shown on the board and as a tag on the desk in the pixel office.
+- **Toasts** when a department starts on a task and when it finishes.
+- Replies close a department's **oldest** open task (it answers in order). Tasks answered together in one reply close once its tab is idle.
+
 ## 0.11.1
 
 - **Fills the pane:** the department office spans every column at the largest whole-number scale, and spare width goes into wider desks and rooms, so there's no empty strip on the right. It resizes with the pane. Before, it was sized from the assumed 7x17 cell, so on bigger cells the terminal showed it at its own small size.
