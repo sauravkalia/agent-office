@@ -211,3 +211,16 @@ test('a toast when a department starts on a task, and when it finishes', { optio
   await $.turn.start({ text: '<cross-session-message from="uds:/tmp/1.sock" from-name="github-1" from-mode="prompting">\nRadarChart fixed, PR #612\n</cross-session-message>', turnId: 'T2' })
   expect(toasts.some(t => /✓ Sphere Dev finished \(sphere-v3-web\): RadarChart fixed, PR #612/.test(t))).toBe(true)
 })
+
+test('/clear keeps the pixel office: the style is about the terminal, not the conversation', { options: { departments: DEPTS, cellPx: '7x17' } }, async ($, on) => {
+  deptSetup(on, 'desk')
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
+  await $.session.end({ reason: 'clear', sessionId: 'hq' } as never)
+  const out = await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
+  expect(JSON.stringify(out)).toContain('Pixel office on. ')
+  const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
+  expect(await ui.find({ type: 'Image', key: 'office-dept' })).toBeDefined()
+  await ui.unmount()
+})

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1
+
+- Fix: after `/clear` the pixel office fell back to text, and `/office pixel` then said the terminal couldn't show pictures. `/clear` gives the session an empty store and doesn't run session start again, so both the style you picked and the terminal check were lost. The mod now keeps them itself, so the pixel office survives `/clear`.
+
 ## 0.12.0
 
 - **Supervisor: three tiers.** Quick questions go to Haiku 5.5, everyday tasks to Sonnet 5.5 (the new `standardModel` setting; `session` keeps the old behaviour), and heavy work to Opus 5.5 at high effort. Before, everything but quick questions stayed on the session model. Quick questions mostly stayed there too, because switching to Haiku 4.5 never paid for re-caching Claude Code's ~50k tokens of context.

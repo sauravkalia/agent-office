@@ -105,6 +105,12 @@ const DEFAULT_BUILDING: Building = { live: [], past: [], scannedAt: 0, historyMt
 const building = atom({ plugin: 'agent-office', key: 'building' } as const, DEFAULT_BUILDING)
 const dispatches = atom({ plugin: 'agent-office', key: 'dispatches' } as const, [])
 const pixelEnv = atom({ plugin: 'agent-office', key: 'pixelEnv' } as const, { images: false, denied: false })
+/**
+ * What this terminal can show and the office style you picked, kept by the mod itself: /clear
+ * hands the session an empty store and session.start doesn't run again, so without this the
+ * pixel office fell back to text and believed the terminal couldn't show pictures.
+ */
+const term: { images: boolean | null; cell: { w: number; h: number } | null; style: 'text' | 'pixel' | null } = { images: null, cell: null, style: null }
 
 type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
 
@@ -232,7 +238,8 @@ async function resetAll($: EngineInterface) {
   await update($, log, () => [])
   await update($, turn, () => DEFAULT_TURN)
   await update($, receipt, () => null)
-  await update($, view, () => DEFAULT_VIEW)
+  // The office style is a choice about this terminal, not the conversation: it stays.
+  await update($, view, x => ({ ...DEFAULT_VIEW, style: normalize(DEFAULT_VIEW, x).style }))
   await update($, errands, () => ({}))
   await update($, alerts, () => ({ fired: [] }))
   await update($, sessionDay, () => ({ day: '' }))
@@ -431,6 +438,7 @@ const CELL_PROBE = [
 async function measureCell($: EngineInterface) {
   const r = await $.process.run(['python3', '-c', CELL_PROBE])
   const cell = cellFromWinsize(r.exitCode === 0 ? r.stdout : '')
+  if (cell) term.cell = cell
   if (cell) await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: x?.denied ?? false, cell }))
 }
 
@@ -483,7 +491,8 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
   }
   if (verb === 'pixel') {
     const v = normalize(DEFAULT_VIEW, await read($, view))
-    const style: 'text' | 'pixel' = arg === 'off' || arg === 'text' ? 'text' : arg === 'on' ? 'pixel' : (v.style ?? cfg.officeStyle) === 'pixel' ? 'text' : 'pixel'
+    const style: 'text' | 'pixel' = arg === 'off' || arg === 'text' ? 'text' : arg === 'on' ? 'pixel' : (v.style ?? term.style ?? cfg.officeStyle) === 'pixel' ? 'text' : 'pixel'
+    term.style = style
     const scene: 'office' | 'building' = 'office'
     await update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), style, scene }))
     if (style === 'pixel') await update($, pixelEnv, x => ({ images: x?.images ?? false, denied: false }))
@@ -493,7 +502,7 @@ async function runOffice($: EngineInterface, cfg: Config, args: string) {
       text:
         style === 'text'
           ? 'Office back to text.'
-          : env?.images
+          : env?.images || term.images
             ? 'Pixel office on. /office pixel again (or p in the pane) switches back.'
             : "Pixel office on, but this terminal doesn't look like it shows pictures (kitty, Ghostty or WezTerm, not under tmux), so the text office stays. The desktop app shows it.",
     }
@@ -582,6 +591,7 @@ export const register: Register = (on, options) => {
       $.env.get('WEZTERM_EXECUTABLE'),
     ])
     const images = termShowsImages({ TERM, TERM_PROGRAM, TMUX, KITTY_WINDOW_ID, GHOSTTY_RESOURCES_DIR, WEZTERM_EXECUTABLE })
+    term.images = images
     await update($, pixelEnv, x => ({ images, denied: x?.denied ?? false, cell: x?.cell ?? null }))
     if (images && !cellSet) void measureCell($).catch(() => undefined)
     // While the pixel office is up and something moves, swap in a fresh frame about four times a second.
@@ -1229,7 +1239,9 @@ export const register: Register = (on, options) => {
 
     // ---- pixel floor: the same office as pixel art, an Image in terminals that show pictures, an
     // SVG on the other surfaces; null keeps the text office (opted out, or no pictures here)
-    const isPixel = (v.style ?? cfg.officeStyle) === 'pixel'
+    const isPixel = (v.style ?? term.style ?? cfg.officeStyle) === 'pixel'
+    // After /clear the store starts empty: the terminal's facts come from the mod's own memory.
+    const px = { images: Boolean(pxEnv?.images || term.images), denied: pxEnv?.denied ?? false, cell: pxEnv?.cell ?? term.cell }
     const nextStyle: 'text' | 'pixel' = isPixel ? 'text' : 'pixel'
     // The department office: a person per department, HQ in the middle, rooms on top.
     const folderOfCwd = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() ?? ''
@@ -1289,11 +1301,11 @@ export const register: Register = (on, options) => {
     const deptFloor = (w: number) => {
       const input = deptInput()
       if (e.surface === 'terminal') {
-        if (!pxEnv?.images || pxEnv.denied || !('Image' in els)) {
+        if (!px.images || px.denied || !('Image' in els)) {
           shownDept = null
           return null
         }
-        const cell = cellSet ?? pxEnv.cell ?? FALLBACK_CELL
+        const cell = cellSet ?? px.cell ?? FALLBACK_CELL
         if (!cellSet && lastCols !== w) {
           lastCols = w
           void measureCell($).catch(() => undefined)
@@ -1344,7 +1356,7 @@ export const register: Register = (on, options) => {
         </Box>
       )
       if (e.surface === 'terminal') {
-        if (!pxEnv?.images || pxEnv.denied || !('Image' in els)) {
+        if (!px.images || px.denied || !('Image' in els)) {
           shown = null
           return null
         }
@@ -1388,7 +1400,10 @@ export const register: Register = (on, options) => {
         <Box justifyContent="space-between" width={w}>
           <Text bold>{`office · ${atWork} at work`}</Text>
           <Box columnGap={2}>
-            <Button key="style" plain hotkey="p" label={isPixel ? 'text ▸' : 'pixel ▸'} onPress={() => update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), style: nextStyle }))} />
+            <Button key="style" plain hotkey="p" label={isPixel ? 'text ▸' : 'pixel ▸'} onPress={() => {
+              term.style = nextStyle
+              return update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), style: nextStyle }))
+            }} />
             {sceneButton}
           </Box>
           {people.some(p => p.mood === 'waiting') ? <Text color={C.amber}>someone needs your signature</Text> : null}
