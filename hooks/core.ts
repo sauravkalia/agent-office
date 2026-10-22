@@ -117,6 +117,8 @@ export type Config = {
   costWarnPct: number[]
   /** Context fill percentages that raise a toast, ascending. */
   contextWarnPct: number[]
+  /** In HQ: a department's context fill that has it write a handoff, ascending; empty is off. */
+  handoffWarnPct: number[]
   /** The supervisor: route each prompt to a model and effort, or leave the session's own. */
   routing: 'auto' | 'off'
   supervisor: SupervisorConfig
@@ -171,6 +173,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     costBudgetUsd: typeof o.costBudgetUsd === 'number' && o.costBudgetUsd >= 0 ? o.costBudgetUsd : 5,
     costWarnPct: percentList(str('costWarnPct', ''), [50, 80, 100]),
     contextWarnPct: percentList(str('contextWarnPct', ''), [70, 90]),
+    handoffWarnPct: /^\s*(off|none|0)?\s*$/i.test(str('handoffWarnPct', '60,80')) ? [] : percentList(str('handoffWarnPct', ''), [60, 80]),
     routing: str('routing', 'auto') === 'off' ? 'off' : 'auto',
     officeStyle: str('officeStyle', 'text') === 'pixel' ? 'pixel' : 'text',
     cellPx: str('cellPx', 'auto'),

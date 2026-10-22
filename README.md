@@ -169,6 +169,7 @@ How it works:
 
 What to know:
 
+- **Handoff alerts:** each department's tab writes its context fill into its status file. When one crosses `handoffWarnPct` (60% and 80% by default), HQ sends it one message, *"Context at N%. Finish your current step, write a short handoff (done, pending, branches/PRs), and tell Saurav you're ready for /clear."*, and raises a toast in HQ: *"Sphere Dev at 65%: clear it"*. That happens once per level per session. A jump past both levels sends one message. After `/clear` or a compaction the fill drops and the levels reset. Only the session in the `hq` folder sends these. It skips itself, and any session whose status file is missing or more than 5 minutes old. Set `handoffWarnPct: off` to turn it off.
 - **Keep departments open.** HQ can message a running session, not start a closed one.
 - **Give them fixed names.** `claude -n sphere-dev` in `~/Documents/GitHub` (and so on) keeps the name HQ messages the same across `/clear`. Without `-n`, a restarted session gets a new name (`pr-reviews-15` → `pr-reviews-5a`).
 - **Same permission mode.** A session in a different permission mode than HQ holds incoming messages until you approve them there. Permission prompts for the work itself appear in the department's terminal.
@@ -271,6 +272,7 @@ Compared with upstream, Agent Office adds:
 | `$.process.run` of `python3 -c …` (reads the terminal's window size, nothing else) | the pixel office: your cell size in pixels, so it fills the pane sharply |
 | `$.fs.write` of `~/.claude/agent-office/status/<session>.json`; `$.fs.read` of the department sessions' status files | the department office: which room each department is working in, and which repo |
 | `$.session.cwd`; `$.fs.list` of the session's own folder (folder names only, once a minute) | which repo a shell command works in, in a folder of several |
+| `$.session.send` (HQ only, to a department session, once per handoff level) | the handoff alert: asks a filling department to write a handoff |
 | `turn.step` rewrite of `model` / `effort` (main loop only) | the Supervisor |
 
 `claude plugin validate .` prints exactly what it hooks and calls.
@@ -300,6 +302,7 @@ In `/config`, or under `pluginConfigs["agent-office"].options` in `settings.json
 | `costBudgetUsd` | `5` | session budget for alerts; `0` turns cost alerts off |
 | `costWarnPct` | `50,80,100` | budget percentages that raise a toast |
 | `contextWarnPct` | `70,90` | context-fill percentages that raise a toast |
+| `handoffWarnPct` | `60,80` | in HQ: a department's context fill at which it's asked to write a handoff for `/clear`; `off` turns it off |
 | `motion` | `while-active` | `off` keeps the office and connectors still |
 | `layout` | `auto` | `mini`, `compact`, `wide`, or `auto` |
 | `maxCards` | `3` | agent cards side by side before swimlanes (1–6) |

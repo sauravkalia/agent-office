@@ -1,7 +1,7 @@
 // Departments, as pure data: long-running Claude Code sessions that each own an area (PR reviews,
 // a set of repos, social media…). The supervisor in an HQ session hands a task to the right one
 // with SendMessage instead of spawning a fresh subagent, so each department keeps its own history.
-import type { Dispatch, LiveSession } from '../types'
+import type { Dispatch, LiveSession, SessionStatus } from '../types'
 import { shorten } from './core'
 
 export type Department = { label: string; folders: string[]; handles: string }
@@ -129,3 +129,41 @@ export const boardOf = (
     const last = [...list].reverse().find(x => x.dept === d.label && x.status === 'replied')
     return last && now - (last.endedAt ?? last.at) < 15 * 60_000 ? [{ kind: 'done', label: d.label, repo: last.repo ?? null, reply: last.reply ?? 'replied', at: last.endedAt ?? last.at }] : []
   })
+
+// ---------------------------------------------------------------- handoff alerts
+
+/** A department session as HQ sees it for the handoff alert. */
+export type HandoffDesk = { name: string; label: string; isSelf: boolean; status: SessionStatus | null }
+export type HandoffAlert = { name: string; label: string; pct: number; level: number }
+
+/** A status file older than this says nothing about the session's context now. */
+export const HANDOFF_STALE_MS = 5 * 60_000
+
+/**
+ * Which department sessions just crossed a handoff level, once per level per session (by its
+ * name, which /clear keeps). A jump past several levels is one alert, at the highest. A session
+ * whose fill drops below a level (after /clear or a compaction) can be told again at that level.
+ * HQ itself, and sessions with no status file or a stale one, are left out and keep their state.
+ */
+export const handoffAlerts = (
+  fired: Readonly<Record<string, readonly number[]>>,
+  desks: readonly HandoffDesk[],
+  levels: readonly number[],
+  now: number,
+  staleMs = HANDOFF_STALE_MS,
+): { fired: Record<string, number[]>; alerts: HandoffAlert[] } => {
+  const out: Record<string, number[]> = Object.fromEntries(Object.entries(fired).map(([k, v]) => [k, [...v]]))
+  const alerts: HandoffAlert[] = []
+  for (const d of desks) {
+    const pct = d.status?.ctxPct
+    if (d.isSelf || !d.name || !d.status || pct === undefined || now - d.status.at > staleMs) continue
+    const kept = (out[d.name] ?? []).filter(l => pct >= l)
+    const fresh = levels.filter(l => pct >= l && !kept.includes(l))
+    out[d.name] = [...kept, ...fresh].sort((a, b) => a - b)
+    if (fresh.length > 0) alerts.push({ name: d.name, label: d.label, pct: Math.round(pct), level: fresh[fresh.length - 1]! })
+  }
+  return { fired: out, alerts }
+}
+
+export const handoffMessage = (pct: number) =>
+  `Context at ${pct}%. Finish your current step, write a short handoff (done, pending, branches/PRs), and tell Saurav you're ready for /clear.`

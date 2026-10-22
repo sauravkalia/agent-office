@@ -70,7 +70,8 @@ import type { DeptInput, SlotInfo } from './dept-office'
 import { AW as ART_W, AH as ART_H, HQ_SLOT, ROOM_ZONES, drawScene, lookOf, parseCell, pixelBox, scaleInto, setLayout } from './pixel2-core'
 import type { RoomZone } from './pixel2-core'
 import { encodePngRgb } from './png-core'
-import { activityOf, answerDispatch, boardOf, crossMessageOf, deptOfSession, desksOf, rosterText, settleIdle } from './departments-core'
+import { activityOf, answerDispatch, boardOf, crossMessageOf, deptOfSession, desksOf, handoffAlerts, handoffMessage, rosterText, settleIdle } from './departments-core'
+import type { HandoffDesk } from './departments-core'
 import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
 import { SESSION, applyTarget, cacheKey, classify, decide } from './supervisor-core'
 import type { Tier } from './supervisor-core'
@@ -377,6 +378,31 @@ async function scanBuilding($: EngineInterface, cfg: Config, withHistory = true)
     const settled = settleIdle(list, live, now)
     if (settled.some((x, i) => x !== list[i])) await update($, dispatches, () => settled)
     await toastStarts($, cfg, live, status, now)
+    if (cfg.handoffWarnPct.length > 0) await handoffCheck($, cfg, live, status, now)
+  }
+}
+
+/**
+ * HQ only (the session in the `hq` folder, as the department office has it): tells a department
+ * whose context crossed a handoff level to write a handoff, once per level, and raises a toast.
+ * Kept by the mod itself, not the store, so HQ's own /clear doesn't send them all again.
+ */
+let handoffFired: Record<string, number[]> = {}
+async function handoffCheck($: EngineInterface, cfg: Config, live: LiveSession[], status: Record<string, SessionStatus>, now: number) {
+  const selfId = await $.session.id().catch(() => '')
+  const cwd = live.find(s => s.sessionId === selfId)?.cwd ?? (await $.session.cwd().catch(() => ''))
+  if (folderOfPath(cwd) !== HQ_FOLDER) return
+  const desks: HandoffDesk[] = cfg.departments.flatMap(d =>
+    desksOf(d, live, selfId).flatMap(k => [k.session, ...k.others])
+      .filter((s): s is LiveSession => Boolean(s))
+      .map(s => ({ name: s.name, label: d.label, isSelf: s.sessionId === selfId, status: status[s.sessionId] ?? null })),
+  )
+  const r = handoffAlerts(handoffFired, desks, cfg.handoffWarnPct, now)
+  handoffFired = r.fired
+  for (const al of r.alerts) {
+    const sent = await $.session.send({ to: al.name, text: handoffMessage(al.pct) }).catch(() => ({ isDelivered: false as const, reason: 'not sent' }))
+    $.ui.toast(`${al.label} at ${al.pct}%: clear it`, { timeoutMs: 8000 })
+    await say($, 'facilities', `${al.label} (${al.name}) at ${al.pct}%: ${sent.isDelivered ? 'asked for a handoff' : `couldn't message it (${sent.reason})`}`, 'error')
   }
 }
 
@@ -385,6 +411,9 @@ async function scanBuilding($: EngineInterface, cfg: Config, withHistory = true)
  * task HQ handed it in the last ten minutes, naming the repo it's in.
  */
 const toasted = new Set<string>()
+/** The folder HQ runs in: its session is the one that watches over the departments. */
+const HQ_FOLDER = 'hq'
+const folderOfPath = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() ?? ''
 async function toastStarts($: EngineInterface, cfg: Config, live: LiveSession[], status: Record<string, SessionStatus>, now: number) {
   const list = listOf<Dispatch>(await read($, dispatches))
   const selfId = await $.session.id().catch(() => '')
@@ -404,6 +433,10 @@ async function toastStarts($: EngineInterface, cfg: Config, live: LiveSession[],
  * what it's doing. Written when the room or the line changes, at most every second otherwise.
  */
 let lastStatus = { key: '', at: 0 }
+/** The room and line last written, so a context measurement can rewrite the file around them. */
+let lastWhere = { zone: 'desk', text: '' }
+/** This session's context fill at its last measurement, for HQ's handoff alert. */
+let lastCtx: { pct: number; tokens: number | null; window: number | null } | null = null
 /** The repo this session last worked in, for a folder of several repos; '' when it can't tell. */
 let lastRepo = ''
 /** The session folder's own folders (its repos, in a folder of several), looked up once a minute. */
@@ -417,12 +450,15 @@ async function subfolders($: EngineInterface, cwd: string) {
 }
 async function writeStatus($: EngineInterface, zone: string, text: string, isError = false) {
   const now = await $.clock.now()
-  const key = `${zone}|${text}|${isError}|${lastRepo}`
+  lastWhere = { zone, text }
+  const key = `${zone}|${text}|${isError}|${lastRepo}|${lastCtx ? Math.floor(lastCtx.pct) : ''}`
   if (key === lastStatus.key && now - lastStatus.at < 1000) return
   lastStatus = { key, at: now }
   const [home, sid] = await Promise.all([$.env.get('HOME'), $.session.id().catch(() => '')])
   if (!home || !sid) return
-  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now, ...(lastRepo ? { repo: lastRepo } : {}) }))
+  const repo = lastRepo ? { repo: lastRepo } : {}
+  const ctx = lastCtx ? { ctxPct: lastCtx.pct, ...(lastCtx.tokens !== null ? { ctxTokens: lastCtx.tokens } : {}), ...(lastCtx.window !== null ? { window: lastCtx.window } : {}) } : {}
+  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now, ...repo, ...ctx }))
 }
 
 /**
@@ -647,6 +683,7 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
       lastRepo = ''
+      lastCtx = null
       await resetAll($)
       await refreshStatus($, cfg)
     }
@@ -792,6 +829,10 @@ export const register: Register = (on, options) => {
       }
     }
     if (e.changed.includes('context') || e.changed.includes('cost')) await refreshStatus($, cfg)
+    if (e.changed.includes('context') && e.context.percent !== undefined) {
+      lastCtx = { pct: Math.round(e.context.percent * 10) / 10, tokens: e.context.tokens ?? null, window: e.context.window }
+      await writeStatus($, lastWhere.zone, lastWhere.text).catch(() => undefined)
+    }
     return next(e)
   })
 
@@ -1248,7 +1289,7 @@ export const register: Register = (on, options) => {
     const deptInput = (): DeptInput => {
       const selfLive = bld.live.find(s => s.sessionId === selfId)
       const selfIsDept = cfg.departments.some(d => desksOf(d, bld.live, selfId).some(k => k.isSelf))
-      const hqLive = bld.live.find(s => folderOfCwd(s.cwd) === 'hq') ?? (selfIsDept ? undefined : selfLive)
+      const hqLive = bld.live.find(s => folderOfCwd(s.cwd) === HQ_FOLDER) ?? (selfIsDept ? undefined : selfLive)
       const stateOf = (s: LiveSession | undefined | null) => (!s ? 'closed' : s.sessionId === selfId ? (m.isRunning ? 'busy' : 'idle') : s.status === 'busy' ? 'busy' : 'idle') as SlotInfo['state']
       const slots: SlotInfo[] = [{ slot: HQ_SLOT, label: 'HQ', look: 'hq', state: stateOf(hqLive), dispatch: null, zone: null, isError: false }]
       cfg.departments.slice(0, 5).forEach((d, i) => {

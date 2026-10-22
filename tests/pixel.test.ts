@@ -2,6 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 import { PX_H, PX_W, base64, crc32, drawOffice, encodePng, pixelAt, roomOrigin, rowsFor, shirtOf, termShowsImages } from '../hooks/pixel-core'
+import { handoffMessage } from '../hooks/departments-core'
 import type { Person } from '../types'
 
 const person = (id: string, name: string, zone: Person['zone'], mood: Person['mood'] = 'ok', isBoss = false): Person => ({ id, name, zone, mood, isBoss, quip: '' })
@@ -140,14 +141,14 @@ const registry = [
   { sessionId: 'pr', name: 'pr-1', cwd: '/u/pr-reviews', status: 'idle', kind: 'interactive', updatedAt: 1 },
   { sessionId: 'gh', name: 'github-1', cwd: '/u/GitHub', status: 'busy', kind: 'interactive', updatedAt: 1 },
 ]
-const files = (statusZone: string): Record<string, string> => ({
+const files = (statusZone: string, extra: Record<string, unknown> = {}): Record<string, string> => ({
   ...Object.fromEntries(registry.map((s, i) => [`/h/.claude/sessions/${i}.json`, JSON.stringify(s)])),
-  '/h/.claude/agent-office/status/gh.json': JSON.stringify({ zone: statusZone, text: 'WebSearch → radar chart', isError: false, at: 1 }),
+  '/h/.claude/agent-office/status/gh.json': JSON.stringify({ zone: statusZone, text: 'WebSearch → radar chart', isError: false, at: 1, ...extra }),
 })
-const deptSetup = (on: On, zone: string) => {
+const deptSetup = (on: On, zone: string, extra: Record<string, unknown> = {}, selfId = 'hq') => {
   setup(on, { TERM_PROGRAM: 'ghostty', HOME: '/h' })
-  const fs = files(zone)
-  on('session.id', () => ({ value: 'hq' }))
+  const fs = files(zone, extra)
+  on('session.id', () => ({ value: selfId }))
   on('fs.list', () => ({ value: registry.map((_, i) => ({ name: `${i}.json`, kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false })) }))
   on('fs.read', (_$, e) => {
     const v = fs[(e as { path: string }).path]
@@ -223,4 +224,68 @@ test('/clear keeps the pixel office: the style is about the terminal, not the co
   const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
   expect(await ui.find({ type: 'Image', key: 'office-dept' })).toBeDefined()
   await ui.unmount()
+})
+
+// ---------------------------------------------------------------- handoff alerts
+
+test('HQ asks a department past a handoff level for a handoff, once, and toasts', { options: { departments: DEPTS } }, async ($, on) => {
+  deptSetup(on, 'desk', { ctxPct: 64.6, ctxTokens: 646_000, window: 1_000_000 })
+  const sent: { to: unknown; text: string }[] = []
+  on('session.send', (_$, e) => {
+    sent.push({ to: e.to, text: e.text })
+    return { isDelivered: true as const }
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  // Two looks around: one message, not one per look.
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  expect(sent).toEqual([{ to: 'github-1', text: handoffMessage(65) }])
+  expect(toasts).toEqual(['Sphere Dev at 65%: clear it'])
+})
+
+test('only HQ sends handoff alerts: a department looking around messages nobody', { options: { departments: DEPTS } }, async ($, on) => {
+  deptSetup(on, 'desk', { ctxPct: 90 }, 'pr')
+  const sent: unknown[] = []
+  on('session.send', (_$, e) => {
+    sent.push(e.to)
+    return { isDelivered: true as const }
+  })
+  await $.session.start({ cwd: '/u/pr-reviews', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  expect(sent).toEqual([])
+})
+
+test('handoffWarnPct off turns the alert off', { options: { departments: DEPTS, handoffWarnPct: 'off' } }, async ($, on) => {
+  deptSetup(on, 'desk', { ctxPct: 90 })
+  const sent: unknown[] = []
+  on('session.send', (_$, e) => {
+    sent.push(e.to)
+    return { isDelivered: true as const }
+  })
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  expect(sent).toEqual([])
+})
+
+test('a session writes its context fill into its status file when it measures', async ($, on) => {
+  setup(on, { HOME: '/h' })
+  on('session.id', () => ({ value: 'gh' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', () => ({ deny: 'missing' }))
+  on('fs.stat', () => ({ deny: 'missing' }))
+  const writes: Record<string, string> = {}
+  on('fs.write', (_$, e) => {
+    writes[e.path] = e.text
+    return { value: undefined }
+  })
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/u/GitHub', surface: 'terminal', isInteractive: true } as never)
+  await $.session.measure({ context: { window: 1_000_000, percent: 62.44, tokens: 624_400 }, cost: { usd: 1 } as never, rateLimits: [], changed: ['context'] })
+  const status = JSON.parse(writes['/h/.claude/agent-office/status/gh.json'] ?? '{}')
+  expect(status).toMatchObject({ zone: 'desk', ctxPct: 62.4, ctxTokens: 624_400, window: 1_000_000 })
 })

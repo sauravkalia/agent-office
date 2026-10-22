@@ -121,6 +121,12 @@
       "type": "string",
       "default": "50,80,100"
     },
+    "handoffWarnPct": {
+      "title": "Handoff alert levels",
+      "description": "In HQ: comma-separated context-fill percentages at which a department is asked to write a handoff so you can /clear it; off turns it off",
+      "type": "string",
+      "default": "60,80"
+    },
     "contextWarnPct": {
       "title": "Context alert levels",
       "description": "Comma-separated context-fill percentages that raise a toast",

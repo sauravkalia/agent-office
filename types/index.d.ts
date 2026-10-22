@@ -130,7 +130,17 @@ export type Dispatch = {
 
 /** What the last scan of the machine found. */
 /** What a session last wrote about itself for the department office: which room it's working in. */
-export type SessionStatus = { zone: string; text: string; isError: boolean; at: number; repo?: string }
+export type SessionStatus = {
+  zone: string
+  text: string
+  isError: boolean
+  at: number
+  repo?: string
+  /** Its context fill when it last measured: percent, tokens and the window. Absent in older files. */
+  ctxPct?: number
+  ctxTokens?: number
+  window?: number
+}
 
 export type Building = {
   live: LiveSession[]

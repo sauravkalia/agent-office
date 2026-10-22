@@ -64,7 +64,7 @@ test('the supervisor hands research to the engineer, and the org chart shows the
 
 // ---------------------------------------------------------------- departments
 
-import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, rosterText, settleIdle } from '../hooks/departments-core'
+import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, handoffAlerts, rosterText, settleIdle } from '../hooks/departments-core'
 
 const DEPTS = 'PR Review=pr-reviews: reviewing pull requests | Sphere Dev=sphere-web,sphere-v3-web: Sphere coding | Social=social-expert'
 const live = [
@@ -142,4 +142,50 @@ test('HQ: a SendMessage to a department is tracked, its reply closes it, and the
   await $.turn.start({ text: '<cross-session-message from="uds:/x" from-name="pr-reviews-35">\nPR 504: 2 blockers\n</cross-session-message>', turnId: 'H2' })
   expect(await ui.find({ text: /✓ PR 504: 2 blockers/ })).toBeDefined()
   await ui.unmount()
+})
+
+// ---------------------------------------------------------------- handoff alerts
+
+test('handoff alerts: once per level, the highest on a jump, again after the fill drops', () => {
+  const st = (ctxPct: number | undefined, at = 1_000) => ({ zone: 'desk', text: '', isError: false, at, ...(ctxPct === undefined ? {} : { ctxPct }) })
+  const desk = (ctxPct: number | undefined, over: Partial<{ isSelf: boolean; at: number; status: null }> = {}) => ({
+    name: 'github-4b',
+    label: 'Sphere Dev',
+    isSelf: over.isSelf ?? false,
+    status: over.status === null ? null : st(ctxPct, over.at),
+  })
+  const levels = [60, 80]
+  const a = handoffAlerts({}, [desk(55)], levels, 2_000)
+  expect(a.alerts).toEqual([])
+  const b = handoffAlerts(a.fired, [desk(61.2)], levels, 2_000)
+  expect(b.alerts).toEqual([{ name: 'github-4b', label: 'Sphere Dev', pct: 61, level: 60 }])
+  // Still past 60: nothing new.
+  expect(handoffAlerts(b.fired, [desk(70)], levels, 2_000).alerts).toEqual([])
+  const c = handoffAlerts(b.fired, [desk(83)], levels, 2_000)
+  expect(c.alerts.map(x => x.level)).toEqual([80])
+  // A jump from nothing to 90%: one alert, at the highest level.
+  expect(handoffAlerts({}, [desk(90)], levels, 2_000).alerts.map(x => x.level)).toEqual([80])
+  // After /clear the fill drops: the levels reset, and crossing 60 again alerts again.
+  const cleared = handoffAlerts(c.fired, [desk(5)], levels, 2_000)
+  expect(cleared.fired['github-4b']).toEqual([])
+  expect(handoffAlerts(cleared.fired, [desk(62)], levels, 2_000).alerts.map(x => x.level)).toEqual([60])
+})
+
+test('handoff alerts skip HQ itself, a missing status, a stale one, and one without a context fill', () => {
+  const st = (at: number, ctxPct?: number) => ({ zone: 'desk', text: '', isError: false, at, ...(ctxPct === undefined ? {} : { ctxPct }) })
+  const now = 10 * 60_000
+  const r = handoffAlerts(
+    { 'pr-1': [60] },
+    [
+      { name: 'hq-1', label: 'HQ', isSelf: true, status: st(now, 95) },
+      { name: 'pr-1', label: 'PR Review', isSelf: false, status: null },
+      { name: 'q-1', label: 'Quilt', isSelf: false, status: st(now - 6 * 60_000, 95) },
+      { name: 's-1', label: 'Social', isSelf: false, status: st(now) },
+    ],
+    [60, 80],
+    now,
+  )
+  expect(r.alerts).toEqual([])
+  // A session left out keeps what it was told.
+  expect(r.fired['pr-1']).toEqual([60])
 })

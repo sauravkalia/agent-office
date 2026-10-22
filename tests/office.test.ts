@@ -139,6 +139,9 @@ test('consults open, close by id, and draw on a shared timeline', () => {
 
 test('config is read leniently: bad values fall back to defaults', () => {
   const d = parseConfig({})
+  expect(d.handoffWarnPct).toEqual([60, 80])
+  expect(parseConfig({ handoffWarnPct: 'off' }).handoffWarnPct).toEqual([])
+  expect(parseConfig({ handoffWarnPct: '85, 70' }).handoffWarnPct).toEqual([70, 85])
   expect([d.maxCards, d.layout, d.motion, d.moments, d.panels.length]).toEqual([3, 'auto', true, true, 8])
   expect(d.architect.test('fable-advisor:fable-advisor')).toBe(true)
   const c = parseConfig({ architectPattern: '([', maxCards: 99, layout: 'diagonal', panels: 'log, gate ,nope,gate', motion: 'off' })
