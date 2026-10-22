@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 (2026-10-22)
 
 - **Handoff alerts across sessions:** each tab writes its context fill (`ctxPct`, `ctxTokens`, `window`) into its status file when it measures. HQ checks the departments on every scan. When one crosses a `handoffWarnPct` level (default `60,80`; `off` turns it off), HQ messages it once to finish its step, write a handoff and say it's ready for `/clear`, and toasts "<department> at N%: clear it". It sends once per level per session and resets when the fill drops. It never messages HQ itself, or a session whose status file is missing or more than 5 minutes old. Older status files still read fine.
 
