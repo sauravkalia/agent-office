@@ -20,6 +20,8 @@ export type SlotInfo = {
   repo?: string | null
   /** What its session is doing right now, in words. */
   activity?: string | null
+  /** Its session waits on you: the person waves, under an amber "!". */
+  isWaiting?: boolean
 }
 
 export type DeptInput = { slots: SlotInfo[]; hour: number; minute: number }
@@ -62,7 +64,8 @@ export const direct = (d: Director, input: DeptInput, now: number): { scene: Sce
       d.seen.set(s.slot, key)
     }
     // Between errands: go where the session is working, or back to the desk.
-    const want = isRoom(s.zone) && s.state === 'busy' ? ({ kind: 'room', zone: s.zone } as const) : ({ kind: 'desk', slot: s.slot } as const)
+    // Waiting on you: back at the desk, where the wave can be seen.
+    const want = isRoom(s.zone) && s.state === 'busy' && !s.isWaiting ? ({ kind: 'room', zone: s.zone } as const) : ({ kind: 'desk', slot: s.slot } as const)
     const there = a.at.kind === want.kind && (want.kind !== 'room' || (a.at.kind === 'room' && a.at.zone === want.zone))
     if (a.queue.length === 0 && !a.trip) {
       if (a.stay && a.stay.tag === 'work' && !there) a = { ...a, stay: null }
@@ -90,7 +93,7 @@ export const direct = (d: Director, input: DeptInput, now: number): { scene: Sce
     const recentReply = s.dispatch?.status === 'replied' && now - (s.dispatch.endedAt ?? s.dispatch.at) < 15 * 60_000
     const hqSent = s.slot === HQ_SLOT && input.slots.some(o => o.dispatch?.status === 'sent' && now - o.dispatch.at < 5_000)
     const kind: BubbleKind | null =
-      s.state === 'closed' ? null : hqSent ? 'sent' : s.dispatch?.status === 'sent' ? (s.slot === HQ_SLOT ? 'busy' : 'sent') : recentReply ? 'reply' : s.state === 'busy' ? 'busy' : 'idle'
+      s.state === 'closed' ? null : s.isWaiting ? 'ask' : hqSent ? 'sent' : s.dispatch?.status === 'sent' ? (s.slot === HQ_SLOT ? 'busy' : 'sent') : recentReply ? 'reply' : s.state === 'busy' ? 'busy' : 'idle'
     const b = d.bubbles.get(s.slot)
     if (!b || b.kind !== kind) d.bubbles.set(s.slot, { kind, since: now })
     const paper = s.dispatch?.status === 'sent' && d.briefDone.get(s.slot) === `${s.dispatch.at}`

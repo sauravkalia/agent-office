@@ -64,7 +64,7 @@ test('the supervisor hands research to the engineer, and the org chart shows the
 
 // ---------------------------------------------------------------- departments
 
-import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, handoffAlerts, rosterText, settleIdle } from '../hooks/departments-core'
+import { answerDispatch, crossMessageOf, deptOfSession, desksOf, parseDepartments, asksUser, handoffAlerts, rosterText, settleIdle } from '../hooks/departments-core'
 
 const DEPTS = 'PR Review=pr-reviews: reviewing pull requests | Sphere Dev=sphere-web,sphere-v3-web: Sphere coding | Social=social-expert'
 const live = [
@@ -188,4 +188,38 @@ test('handoff alerts skip HQ itself, a missing status, a stale one, and one with
   expect(r.alerts).toEqual([])
   // A session left out keeps what it was told.
   expect(r.fired['pr-1']).toEqual([60])
+})
+
+// ---------------------------------------------------------------- waiting on you
+
+test('a turn that ends by asking waits on you', () => {
+  expect(asksUser('Tests pass and the build is green.\n\nShall I commit and push?')).toBe(true)
+  expect(asksUser('All 104 tests pass.\n\nSay the word and I\'ll release it as 0.13.0.')).toBe(true)
+  expect(asksUser('Ready on the branch. Let me know if you want the toasts too.')).toBe(true)
+  expect(asksUser('Two decisions for you:\n1. **Commit and publish as 0.12.0?**\n2. Which model for everyday prompts?')).toBe(true)
+  expect(asksUser('Done. Want me to open the PR? (It targets main.)')).toBe(true)
+  expect(asksUser('Done. Want me to open the PR (it targets main)?')).toBe(true)
+  // Handing the decision over without a "?".
+  expect(asksUser('The review is ready. Say "post it" here and I\'ll submit it.')).toBe(true)
+  expect(asksUser('Both fixes work. Tell me which and I\'ll proceed.')).toBe(true)
+  expect(asksUser('It moves the foot down 32px, so I left it alone until you say so.')).toBe(true)
+  expect(asksUser('Posting is public, so I\'ll wait for your OK.')).toBe(true)
+})
+
+test('a "?" that is not a question for you does not count', () => {
+  // Earlier in the answer, then a plain closing.
+  expect(asksUser('Why did it fail? The cache key changed.\n\nFixed and pushed.')).toBe(false)
+  // In code, inline code, a quote, a table or a heading.
+  expect(asksUser('Fixed the regex:\n\n```ts\nconst ok = /a?b/.test(x) ? 1 : 0\n```')).toBe(false)
+  expect(asksUser('It now matches `colou?r`.')).toBe(false)
+  expect(asksUser('HQ asked: "Can you confirm the push?"\n\n> Is it safe?')).toBe(false)
+  expect(asksUser('| Check | Result |\n|---|---|\n| Pushed? | yes |')).toBe(false)
+  expect(asksUser('## Why routing stayed on Opus?\n\nIt never paid for the re-cache.')).toBe(false)
+  // A summary list of what was asked, not a question now.
+  expect(asksUser('Answered:\n- why the build failed\n- what changed in 0.12.1')).toBe(false)
+  expect(asksUser('')).toBe(false)
+  // An option mentioned, not offered.
+  expect(asksUser('The short names remain the option if you ever want the map calmer.')).toBe(false)
+  expect(asksUser('Committed locally as 3529459. Seven commits are waiting to be pushed.')).toBe(false)
+  expect(asksUser('Sphere Dev is on it. Nothing gets pushed until you say so in its tab.')).toBe(false)
 })

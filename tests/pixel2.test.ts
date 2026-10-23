@@ -196,3 +196,13 @@ test('the cell size comes from the terminal window size', () => {
   expect(cellFromWinsize('50 74 0 0')).toBe(null)
   expect(cellFromWinsize('ERR')).toBe(null)
 })
+
+test('a department waiting on you stays at its desk under an amber "!"', () => {
+  const d = newDirector()
+  const input = { slots: slots({ state: 'busy', zone: 'warehouse', isWaiting: true }), hour: 12, minute: 0 }
+  direct(d, input, 0)
+  const { scene } = direct(d, input, 5_000)
+  const desk = scene.desks.find(x => x.slot === input.slots.find(s => s.zone === 'warehouse')!.slot)!
+  expect(desk.bubble).toBe('ask')
+  expect(scene.away.has(desk.slot)).toBe(false)
+})

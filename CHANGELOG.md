@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Waiting on you:** a department whose tab waits on you waves at its desk under an amber "!", and its plate blinks amber. That's a permission prompt, a question picker, or a turn that ended by asking (a trailing question, or "say the word", "tell me which" and the like). A "?" in code, a quote, a table or earlier in the reply doesn't count. The board card says "! waiting on you". Each tab writes `waiting` into its status file, and it clears when you answer or the next turn starts.
+
 ## 0.13.0 (2026-10-22)
 
 - **Handoff alerts across sessions:** each tab writes its context fill (`ctxPct`, `ctxTokens`, `window`) into its status file when it measures. HQ checks the departments on every scan. When one crosses a `handoffWarnPct` level (default `60,80`; `off` turns it off), HQ messages it once to finish its step, write a handoff and say it's ready for `/clear`, and toasts "<department> at N%: clear it". It sends once per level per session and resets when the fill drops. It never messages HQ itself, or a session whose status file is missing or more than 5 minutes old. Older status files still read fine.

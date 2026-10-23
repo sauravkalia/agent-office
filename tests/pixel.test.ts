@@ -289,3 +289,45 @@ test('a session writes its context fill into its status file when it measures', 
   const status = JSON.parse(writes['/h/.claude/agent-office/status/gh.json'] ?? '{}')
   expect(status).toMatchObject({ zone: 'desk', ctxPct: 62.4, ctxTokens: 624_400, window: 1_000_000 })
 })
+
+// ---------------------------------------------------------------- waiting on you
+
+test('a tab says it waits on you: a permission prompt, then a turn that ends asking; a new turn clears it', async ($, on) => {
+  setup(on, { HOME: '/h' })
+  on('session.id', () => ({ value: 'gh' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', () => ({ deny: 'missing' }))
+  on('fs.stat', () => ({ deny: 'missing' }))
+  let status: Record<string, unknown> = {}
+  on('fs.write', (_$, e) => {
+    if (e.path.endsWith('/status/gh.json')) status = JSON.parse(e.text)
+    return { value: undefined }
+  })
+  on('tool.check', () => ({ decision: 'ask' }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/u/GitHub', surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'push it', turnId: 'W1' })
+  await $.tool.check({ tool: 'Bash', input: { command: 'git push' }, tool_use_id: 'w1' })
+  expect(status.waiting).toBe('permission')
+  // Approved: the call runs, and nobody waits.
+  await $.tool.call({ tool: 'Bash', command: 'git push', tool_use_id: 'w1' } as never)
+  expect(status.waiting).toBeUndefined()
+  await $.turn.complete({ answer: 'Pushed to the branch.\n\nShall I open the PR?', durationMs: 10, isAborted: false, turnId: 'W1', reason: 'answer' } as never)
+  expect(status.waiting).toBe('answer')
+  await $.turn.start({ text: 'yes', turnId: 'W2' })
+  expect(status.waiting).toBeUndefined()
+  await $.turn.complete({ answer: 'Opened #612. Why did CI fail? A flaky test; rerun passed.\n\nAll green.', durationMs: 10, isAborted: false, turnId: 'W2', reason: 'answer' } as never)
+  expect(status.waiting).toBeUndefined()
+})
+
+test('HQ: a department waiting on you waves and the board says so', { options: { departments: DEPTS } }, async ($, on) => {
+  deptSetup(on, 'warehouse', { waiting: 'answer', at: 1 })
+  await $.session.start({ cwd: '/u/hq', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'office', args: 'departments', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'office', args: 'pixel on', origin: { kind: 'user' } } as never)
+  await $.turn.start({ text: 'fix it', turnId: 'Q1' })
+  await $.tool.call({ tool: 'SendMessage', to: 'github-1', message: 'Task from HQ: fix RadarChart' } as never)
+  const ui = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, bodyColumns: 72 } })
+  expect(await ui.find({ text: /! waiting on your answer/ })).toBeDefined()
+  await ui.unmount()
+})

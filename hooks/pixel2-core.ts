@@ -182,12 +182,29 @@ export const drawWalker = (f: Canvas, look: Look, x: number, y: number, facing: 
   }
 }
 
-const drawSeated = (f: Canvas, look: Look, x: number, y: number, tick: number, busy: boolean, seed: number, lift: number) => {
+const drawSeated = (f: Canvas, look: Look, x: number, y: number, tick: number, busy: boolean, seed: number, lift: number, waving = false) => {
   const s = SPEC[look]
   const breathe = (tick + seed * 7) % 29 < 6 ? 1 : 0
   const blink = (tick + seed * 11) % 42 < 2
   const up = Math.round(lift * 3)
-  SPR(f, x, y + breathe - up, [...headFront(s, blink), ...torso(s)], keysOf(s))
+  const body = torso(s)
+  // Waving: the left arm leaves the side and goes up, the hand swinging out and back (the
+  // bubble sits on the right, so the hand never covers it).
+  if (waving) body[2] = '.' + body[2]!.slice(1)
+  if (waving) body[3] = '.' + body[3]!.slice(1)
+  SPR(f, x, y + breathe - up, [...headFront(s, blink), ...body], keysOf(s))
+  if (waving) {
+    const by = y + breathe - up
+    // Three poses, out-mid-in-mid, about three times a second.
+    const out = [0, 1, 2, 1][Math.floor(tick / 2) % 4]!
+    R(f, x - 1, by + 6, 2, 3, s.shirt)
+    P(f, x - 1, by + 5, C.skin)
+    P(f, x - 1 - Math.min(out, 1), by + 4, C.skin)
+    P(f, x - 1 - out, by + 3, C.skin)
+    P(f, x - 1 - out, by + 2, C.skin)
+    R(f, x - 2 - out, by - 1, 3, 3, C.skin)
+    return
+  }
   if (busy && !up) {
     const hand = Math.floor(tick / 2) % 2
     P(f, x + 3 + hand, y + 12, C.skin)
@@ -361,7 +378,7 @@ export const walkerOf = (a: Actor, now: number): Walker | null => {
 // ---------------------------------------------------------------- the scene
 
 export type DeskState = 'closed' | 'idle' | 'busy'
-export type BubbleKind = 'busy' | 'idle' | 'reply' | 'sent' | 'alert'
+export type BubbleKind = 'busy' | 'idle' | 'reply' | 'sent' | 'alert' | 'ask'
 /** `tag`: the repo it's working in, hung on the desk's front for a department of several. */
 export type Desk = { slot: number; look: Look; label: string; state: DeskState; bubble: BubbleKind | null; bubbleSince: number; paper: boolean; tag?: string | null }
 export type RoomFx = { zone: RoomZone; since: number; flash?: 'fail' | 'pass' }
@@ -390,6 +407,16 @@ const bubble = (f: Canvas, x: number, y: number, kind: BubbleKind, ageFrames: nu
   R(f, x, y, 9, 7, C.white)
   P(f, x + 1, y + 7, C.white)
   P(f, x, y + 8, C.white)
+  if (kind === 'ask') {
+    // Waiting on you: an amber bubble with a "!", nudging up and down.
+    if (Math.floor(tick / 6) % 2) y -= 1
+    R(f, x, y, 9, 7, C.amber)
+    P(f, x + 1, y + 7, C.amber)
+    P(f, x, y + 8, C.amber)
+    R(f, x + 4, y + 1, 1, 3, C.black)
+    P(f, x + 4, y + 5, C.black)
+    return
+  }
   if (kind === 'busy') [2, 4, 6].forEach((dx, k) => Math.floor(tick / 3) % 3 >= k && P(f, x + dx, y + 3, C.black))
   if (kind === 'idle') SPR(f, x + 2, y + 1, ['zzzz', '...z', '..z.', '.z..', 'zzzz'], { z: C.navy })
   if (kind === 'reply') SPR(f, x + 1, y + 1, ['......g', '.....gg', 'g...gg.', 'gg.gg..', '.ggg...'], { g: C.check })
@@ -425,7 +452,8 @@ export const plateName = (label: string, chars: number) => {
 /** The desk's name plate along its bottom edge: its name, and its state at the right. */
 const plate = (f: Canvas, fr: { x: number; w: number }, y: number, d: Desk, tick: number) => {
   const closed = d.state === 'closed'
-  const bg = closed ? C.metalD : PLATE[d.look]
+  // Waiting on you: the plate blinks amber, so it catches the eye from across the pane.
+  const bg = closed ? C.metalD : d.bubble === 'ask' && Math.floor(tick / 6) % 2 ? C.amber : PLATE[d.look]
   R(f, fr.x + 1, y, fr.w - 2, 7, bg)
   const iconW = 7
   const chars = Math.max(2, Math.floor((fr.w - 2 - iconW - 4) / 4))
@@ -436,6 +464,7 @@ const plate = (f: Canvas, fr: { x: number; w: number }, y: number, d: Desk, tick
   if (closed) return
   if (d.bubble === 'busy' || (d.state === 'busy' && !d.bubble)) R(f, ix + 1, y + 2, 3, 3, Math.floor(tick / 6) % 2 ? C.white : C.black)
   else if (d.bubble === 'sent') SPR(f, ix, y + 1, ['aaaaa', 'kakak', 'aakaa', 'aaaaa'], { a: C.white, k: C.black })
+  else if (d.bubble === 'ask') Math.floor(tick / 6) % 2 && SPR(f, ix + 2, y + 1, ['k', 'k', 'k', '.', 'k'], { k: C.black })
   else if (d.bubble === 'reply') SPR(f, ix, y + 1, ['....k', '...kk', 'k.kk.', '.kk..'], { k: C.black })
   else SPR(f, ix, y + 1, ['kkk', '..k', '.k.', 'kkk'], { k: C.black })
 }
@@ -562,7 +591,7 @@ export const drawScene = (sc: Scene, tick: number, now: number): Canvas => {
       R(f, x + 23, y + 8, 10, 10, chair)
       R(f, x + 22, y + 11, 12, 2, chair)
     }
-    if (!closed && !away) drawSeated(f, d.look, x + 22, y + 9, tick, d.state === 'busy', d.slot + 1, isHQ && sc.hqStanding ? 1 : 0)
+    if (!closed && !away) drawSeated(f, d.look, x + 22, y + 9, tick, d.state === 'busy', d.slot + 1, isHQ && sc.hqStanding ? 1 : 0, d.bubble === 'ask')
     const dx = isHQ ? x + 6 : x + 10
     const dw = isHQ ? 44 : 36
     R(f, dx, y + 21, dw, 5, C.wood)

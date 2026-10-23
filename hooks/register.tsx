@@ -70,7 +70,7 @@ import type { DeptInput, SlotInfo } from './dept-office'
 import { AW as ART_W, AH as ART_H, HQ_SLOT, ROOM_ZONES, drawScene, lookOf, parseCell, pixelBox, scaleInto, setLayout } from './pixel2-core'
 import type { RoomZone } from './pixel2-core'
 import { encodePngRgb } from './png-core'
-import { activityOf, answerDispatch, boardOf, crossMessageOf, deptOfSession, desksOf, handoffAlerts, handoffMessage, rosterText, settleIdle } from './departments-core'
+import { activityOf, answerDispatch, asksUser, boardOf, crossMessageOf, deptOfSession, desksOf, handoffAlerts, handoffMessage, rosterText, settleIdle } from './departments-core'
 import type { HandoffDesk } from './departments-core'
 import { agoOf, buildingScene, projectOf, historySince, parseHistory, parseLive } from './building-core'
 import { SESSION, applyTarget, cacheKey, classify, decide } from './supervisor-core'
@@ -411,6 +411,8 @@ async function handoffCheck($: EngineInterface, cfg: Config, live: LiveSession[]
  * task HQ handed it in the last ten minutes, naming the repo it's in.
  */
 const toasted = new Set<string>()
+/** What the work board says while a department waits on you. */
+const WAIT_WORDS = { permission: '! waiting on you: a permission', question: '! waiting on you: a question', answer: '! waiting on your answer' } as const
 /** The folder HQ runs in: its session is the one that watches over the departments. */
 const HQ_FOLDER = 'hq'
 const folderOfPath = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() ?? ''
@@ -435,6 +437,17 @@ async function toastStarts($: EngineInterface, cfg: Config, live: LiveSession[],
 let lastStatus = { key: '', at: 0 }
 /** The room and line last written, so a context measurement can rewrite the file around them. */
 let lastWhere = { zone: 'desk', text: '' }
+
+/**
+ * Whether this session waits on you, and why: a permission prompt, a question picker, or a turn
+ * that ended by asking. Kept by the mod itself, so /clear's empty store doesn't lose it.
+ */
+let waiting: { kind: 'permission' | 'question' | 'answer'; since: number } | null = null
+async function setWaiting($: EngineInterface, kind: 'permission' | 'question' | 'answer' | null) {
+  if ((waiting?.kind ?? null) === kind) return
+  waiting = kind ? { kind, since: await $.clock.now() } : null
+  await writeStatus($, lastWhere.zone, lastWhere.text).catch(() => undefined)
+}
 /** This session's context fill at its last measurement, for HQ's handoff alert. */
 let lastCtx: { pct: number; tokens: number | null; window: number | null } | null = null
 /** The repo this session last worked in, for a folder of several repos; '' when it can't tell. */
@@ -451,14 +464,15 @@ async function subfolders($: EngineInterface, cwd: string) {
 async function writeStatus($: EngineInterface, zone: string, text: string, isError = false) {
   const now = await $.clock.now()
   lastWhere = { zone, text }
-  const key = `${zone}|${text}|${isError}|${lastRepo}|${lastCtx ? Math.floor(lastCtx.pct) : ''}`
+  const key = `${zone}|${text}|${isError}|${lastRepo}|${lastCtx ? Math.floor(lastCtx.pct) : ''}|${waiting?.kind ?? ''}`
   if (key === lastStatus.key && now - lastStatus.at < 1000) return
   lastStatus = { key, at: now }
   const [home, sid] = await Promise.all([$.env.get('HOME'), $.session.id().catch(() => '')])
   if (!home || !sid) return
   const repo = lastRepo ? { repo: lastRepo } : {}
   const ctx = lastCtx ? { ctxPct: lastCtx.pct, ...(lastCtx.tokens !== null ? { ctxTokens: lastCtx.tokens } : {}), ...(lastCtx.window !== null ? { window: lastCtx.window } : {}) } : {}
-  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now, ...repo, ...ctx }))
+  const wait = waiting ? { waiting: waiting.kind } : {}
+  await $.fs.write(`${home}/.claude/agent-office/status/${sid}.json`, JSON.stringify({ zone, text, isError, at: now, ...repo, ...ctx, ...wait }))
 }
 
 /**
@@ -683,6 +697,7 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
       lastRepo = ''
+      waiting = null
       lastCtx = null
       await resetAll($)
       await refreshStatus($, cfg)
@@ -722,6 +737,8 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
+    // You answered, or something else started a turn: nobody is waiting on you now.
+    await setWaiting($, null)
     const [now, cost] = await Promise.all([$.clock.now(), costNow($)])
     await update($, turn, () => ({ ...DEFAULT_TURN, startedAt: now, costAtStart: cost }))
     await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: true }))
@@ -862,6 +879,8 @@ export const register: Register = (on, options) => {
         at: await $.clock.now(),
       }
       await update($, gate, g => recordCheck(normalizeGate(g), check))
+      // A prompt for you is about to show (the main loop's or a subagent's).
+      if (verdict.decision === 'ask') await setWaiting($, 'permission')
       // The status line updates when the call settles; only a refusal ends here.
       if (verdict.decision === 'deny') {
         await say($, 'gate', `denied by rule · ${check.detail}`, 'error')
@@ -873,6 +892,8 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     callLoop.set(e.tool_use_id, e.agentId ?? null)
+    // A question picker waits on you while it's open.
+    if (String(e.tool) === 'AskUserQuestion') await setWaiting($, 'question')
     // The office: the worker sets off for this call's room before it runs, and stays there after.
     const who = e.agentId ?? 'main'
     const isErrand = String(e.tool) !== 'SubagentHandback'
@@ -888,6 +909,8 @@ export const register: Register = (on, options) => {
     }
     if (isErrand) void writeStatus($, room, shorten(describeInput(e.tool, e), 40)).catch(() => undefined)
     const ran = await next(e).finally(() => callLoop.delete(e.tool_use_id))
+    // The call's permission prompt (checked inside it) or its question picker has been answered.
+    if (waiting?.kind === 'permission' || (String(e.tool) === 'AskUserQuestion' && waiting?.kind === 'question')) await setWaiting($, null)
     const didRun = ran.deny === undefined
     if (isErrand) await update($, errands, x => finishErrand(normalizeErrands(x), who, e.tool_use_id, !didRun || ran.isError === true))
     if (isErrand && room === 'server' && ran.isError === true) void writeStatus($, room, shorten(describeInput(e.tool, e), 40), true).catch(() => undefined)
@@ -1015,6 +1038,8 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     const id = e.agentId
     const now = await $.clock.now()
+    // The main loop's turn ended: waiting on you if its last words ask you something.
+    if (!id) await setWaiting($, !e.isAborted && asksUser(e.answer) ? 'answer' : null)
     if (!id) {
       const [t, cards, cost] = await Promise.all([getTurn($), getCards($), costNow($)])
       const r = receiptOf(t, {
@@ -1291,15 +1316,16 @@ export const register: Register = (on, options) => {
       const selfIsDept = cfg.departments.some(d => desksOf(d, bld.live, selfId).some(k => k.isSelf))
       const hqLive = bld.live.find(s => folderOfCwd(s.cwd) === HQ_FOLDER) ?? (selfIsDept ? undefined : selfLive)
       const stateOf = (s: LiveSession | undefined | null) => (!s ? 'closed' : s.sessionId === selfId ? (m.isRunning ? 'busy' : 'idle') : s.status === 'busy' ? 'busy' : 'idle') as SlotInfo['state']
-      const slots: SlotInfo[] = [{ slot: HQ_SLOT, label: 'HQ', look: 'hq', state: stateOf(hqLive), dispatch: null, zone: null, isError: false }]
+      const waitsOn = (s: LiveSession | undefined | null) => Boolean(s && bld.status?.[s.sessionId]?.waiting)
+      const slots: SlotInfo[] = [{ slot: HQ_SLOT, label: 'HQ', look: 'hq', state: stateOf(hqLive), dispatch: null, zone: null, isError: false, isWaiting: waitsOn(hqLive) }]
       cfg.departments.slice(0, 5).forEach((d, i) => {
         const desks = desksOf(d, bld.live, selfId).filter(k => k.session)
-        const desk = desks.find(k => (k.isSelf ? m.isRunning : k.session?.status === 'busy')) ?? desks[0]
+        const desk = desks.find(k => waitsOn(k.session)) ?? desks.find(k => (k.isSelf ? m.isRunning : k.session?.status === 'busy')) ?? desks[0]
         const st = desk?.session ? bld.status?.[desk.session.sessionId] : undefined
         const zone = st && (ROOM_ZONES as readonly string[]).includes(st.zone) ? (st.zone as RoomZone) : null
         const job = sent.find(x => x.dept === d.label && x.status === 'sent') ?? [...sent].reverse().find(x => x.dept === d.label) ?? null
         const repo = (desk?.session?.status === 'busy' ? st?.repo : undefined) ?? (job?.status === 'sent' ? job.repo : undefined) ?? null
-        slots.push({ slot: [0, 2, 3, 4, 5][i]!, label: d.label, look: lookOf(d.label), state: stateOf(desk?.session), dispatch: job, zone, isError: st?.isError ?? false, repo, activity: st?.text ? activityOf(st.text) : null })
+        slots.push({ slot: [0, 2, 3, 4, 5][i]!, label: d.label, look: lookOf(d.label), state: stateOf(desk?.session), dispatch: job, zone, isError: st?.isError ?? false, repo, activity: st?.waiting ? WAIT_WORDS[st.waiting] : st?.text ? activityOf(st.text) : null, isWaiting: waitsOn(desk?.session) })
       })
       const t = new Date(now)
       return { slots, hour: t.getHours(), minute: t.getMinutes() }
@@ -1308,7 +1334,7 @@ export const register: Register = (on, options) => {
     // department is on, in which repo, what it's doing right now, and what waits behind it.
     const deptBoard = (input: DeptInput, w: number) => {
       const items = boardOf(
-        input.slots.filter(x => x.slot !== HQ_SLOT).map(x => ({ label: x.label, isBusy: x.state === 'busy', repo: x.repo ?? null, activity: x.activity ?? null })),
+        input.slots.filter(x => x.slot !== HQ_SLOT).map(x => ({ label: x.label, isBusy: x.state === 'busy' || Boolean(x.isWaiting), repo: x.repo ?? null, activity: x.activity ?? null })),
         sent,
         now,
       )

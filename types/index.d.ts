@@ -137,6 +137,8 @@ export type SessionStatus = {
   at: number
   repo?: string
   /** Its context fill when it last measured: percent, tokens and the window. Absent in older files. */
+  /** Waiting on the user: a permission prompt, a question picker, or a turn that ended asking. */
+  waiting?: 'permission' | 'question' | 'answer'
   ctxPct?: number
   ctxTokens?: number
   window?: number

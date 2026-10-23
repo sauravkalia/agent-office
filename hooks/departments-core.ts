@@ -167,3 +167,46 @@ export const handoffAlerts = (
 
 export const handoffMessage = (pct: number) =>
   `Context at ${pct}%. Finish your current step, write a short handoff (done, pending, branches/PRs), and tell Saurav you're ready for /clear.`
+
+// ---------------------------------------------------------------- waiting on you
+
+/** Words that hand a decision to the user without a question mark. */
+const HANDS_OVER =
+  /\b(say (the word|if|when|which|so)|tell me (which|what|if|whether|when|how)|let me know (if|whether|which|what|when|how)|your call|up to you|until you (say|ok|approve|confirm)|i'?ll wait for your|waiting (on|for) your|once you (approve|confirm|ok|say)|(ok|okay|good) to (push|merge|publish|release|post|deploy|go|proceed)|i can [^.]{0,80}\bif you (want|'d like|like)|if you want me to)\b/i
+
+/**
+ * Whether a finished turn's answer ends by asking the user something, from its closing words
+ * alone. Only the last paragraph counts, after code blocks, inline code, quotes, tables and
+ * headings are taken out, so a "?" in a summary, a snippet or a quoted message doesn't. It asks
+ * when that paragraph's last sentence (or a list item in it) ends in "?", or when it hands the
+ * decision over in words: "say the word", "let me know if", "your call", "OK to push".
+ */
+export const asksUser = (answer: string): boolean => {
+  // Quoted words the user would type back ("say \"post it\"") are the ask itself, not a quote.
+  const text = answer
+    .replace(/\b(say|type|reply|answer)\s+["“][^"”\n]{1,30}["”]/gi, '$1 the word')
+    .replace(/```[\s\S]*?(```|$)/g, '\n\n')
+    .replace(/`[^`\n]*`/g, 'x')
+    .split('\n')
+    .filter(l => !/^\s*(>|\||#{1,6}\s|[-*_]{3,}\s*$)/.test(l))
+    .join('\n')
+    // Quoted speech: "…?" or “…?” is someone else's question.
+    .replace(/["“][^"”\n]*["”]/g, 'x')
+    .replace(/\*\*|__/g, '')
+    .replace(/(^|\W)[*_](\S)/g, '$1$2')
+    .replace(/(\S)[*_](\W|$)/g, '$1$2')
+  const paras = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
+  const last = paras[paras.length - 1]
+  if (!last) return false
+  const lines = last.split('\n').map(l => l.trim()).filter(Boolean)
+  // A list closing the answer: any item that asks.
+  const items = lines.filter(l => /^([-*+]|\d+[.)])\s/.test(l))
+  if (items.length > 0 && items.length === lines.length - (/:$/.test(lines[0] ?? '') ? 1 : 0) && items.some(l => /\?\s*$/.test(l))) return true
+  // An aside after the question ("Want me to open the PR? (It targets main.)") doesn't end the ask.
+  const sentences = last.replace(/\n/g, ' ').replace(/([.!?)])\s+/g, '$1\u0000').split('\u0000').filter(Boolean)
+  while (sentences.length > 1 && /^\(.*\)$/.test(sentences[sentences.length - 1]!)) sentences.pop()
+  const tail = sentences[sentences.length - 1] ?? ''
+  if (/\?\s*[)\]]?\s*$/.test(tail)) return true
+  // "Nothing gets posted until you say so" states a rule for later; it isn't asking now.
+  return HANDS_OVER.test(sentences.slice(-2).filter(x => !/^nothing\b/i.test(x)).join(' '))
+}

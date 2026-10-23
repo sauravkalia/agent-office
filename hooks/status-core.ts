@@ -8,7 +8,7 @@ export const parseStatus = (text: string): SessionStatus | null => {
     if (typeof d.zone !== 'string') return null
     const repo = typeof d.repo === 'string' && d.repo ? { repo: d.repo } : {}
     const num = (k: string) => (typeof d[k] === 'number' && Number.isFinite(d[k]) ? { [k]: d[k] as number } : {})
-    return { zone: d.zone, text: typeof d.text === 'string' ? d.text : '', isError: d.isError === true, at: typeof d.at === 'number' ? d.at : 0, ...repo, ...num('ctxPct'), ...num('ctxTokens'), ...num('window') }
+    return { zone: d.zone, text: typeof d.text === 'string' ? d.text : '', isError: d.isError === true, at: typeof d.at === 'number' ? d.at : 0, ...repo, ...num('ctxPct'), ...num('ctxTokens'), ...num('window'), ...(d.waiting === 'permission' || d.waiting === 'question' || d.waiting === 'answer' ? { waiting: d.waiting } : {}) }
   } catch {
     return null
   }
