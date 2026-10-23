@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 (2026-10-23)
 
 - **Waiting on you:** a department whose tab waits on you waves at its desk under an amber "!", and its plate blinks amber. That's a permission prompt, a question picker, or a turn that ended by asking (a trailing question, or "say the word", "tell me which" and the like). A "?" in code, a quote, a table or earlier in the reply doesn't count. The board card says "! waiting on you". Each tab writes `waiting` into its status file, and it clears when you answer or the next turn starts.
 
